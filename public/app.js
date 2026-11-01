@@ -70,14 +70,17 @@ async function loadTeamData(){
     sb.from("game_lines").select("game_id,bat,pit,fld").eq("team_id",TEAM.id)]);
   const err=p.error||g.error||l.error; if(err)throw err;
   S={team:{name:TEAM.name,season:TEAM.season,league:TEAM.league,innings:TEAM.innings||6,pitchMax:TEAM.pitch_max||85},
-     players:p.data, games:g.data, lines:{}};
+     players:p.data, games:g.data.filter(x=>(x.kind||"game")==="game"), events:g.data.filter(x=>x.kind==="event"), lines:{}};
   for(const r of l.data)S.lines[r.game_id]={bat:r.bat||{},pit:r.pit||{},fld:r.fld||{}};
   const tt=await sb.rpc("team_totals",{t:TEAM.id});
   S.totals={};if(!tt.error)for(const r of tt.data||[])S.totals[r.game_id]={bat:r.bat||{},pit:r.pit||{},fld:r.fld||{}};
   const o=await sb.from("player_games").select("*").eq("team_id",TEAM.id).order("date");
   S.outside=o.error?[]:o.data; S.outsideReady=!o.error;
 }
-const gameRow=g=>({id:g.id,team_id:TEAM.id,date:g.date,time:g.time||"",opp:g.opp,home:!!g.home,loc:g.loc||"",status:g.status||"scheduled",us:g.us,them:g.them,lineup:g.lineup||null});
+const gameRow=g=>({id:g.id,team_id:TEAM.id,date:g.date,time:g.time||"",opp:g.opp,home:!!g.home,loc:g.loc||"",status:g.status||"scheduled",us:g.us,them:g.them,lineup:g.lineup||null,...(g.kind==="event"?{kind:"event"}:{})});
+const isEvent=g=>g&&g.kind==="event";
+const findItem=id=>S.games.find(x=>x.id===id)||S.events.find(x=>x.id===id);
+function putItem(g){S.games=S.games.filter(x=>x.id!==g.id);S.events=S.events.filter(x=>x.id!==g.id);(isEvent(g)?S.events:S.games).push(g);}
 async function q(p){const {data,error}=await p;if(error)throw error;return data;}
 function errText(e){
   const m=(e&&(e.message||e.error))||String(e);
@@ -195,11 +198,21 @@ function renderHeader(){
   const r=record();
   $("#h-record").innerHTML=`<div><b>${r.w}–${r.l}${r.t?"–"+r.t:""}</b><span>Record</span></div><div><b>${r.rs}</b><span>Runs scored</span></div><div><b>${r.ra}</b><span>Runs allowed</span></div>`;
   const nx=S.games.filter(g=>g.status!=="final"&&g.date>=today()).sort((a,b)=>a.date.localeCompare(b.date))[0];
-  $("#h-next").innerHTML=nx?`Next game: <strong>${dow(nx.date)} ${dParts(nx.date).m} ${dParts(nx.date).d}, ${esc(nx.time)}</strong> ${nx.home?"vs":"at"} <strong>${esc(nx.opp)}</strong> · ${esc(nx.loc)}`:"No upcoming games on the schedule.";
+  const ne=S.events.filter(g=>g.date>=today()).sort((a,b)=>a.date.localeCompare(b.date))[0];
+  const nxt=[nx,ne].filter(Boolean).sort((a,b)=>a.date.localeCompare(b.date))[0];
+  $("#h-next").innerHTML=nxt?(isEvent(nxt)?`Next up: <strong>${esc(nxt.opp)}</strong>, <strong>${dow(nxt.date)} ${dParts(nxt.date).m} ${dParts(nxt.date).d}${nxt.time?", "+esc(nxt.time):""}</strong>${nxt.loc?" · "+esc(nxt.loc):""}`:`Next game: <strong>${dow(nxt.date)} ${dParts(nxt.date).m} ${dParts(nxt.date).d}, ${esc(nxt.time)}</strong> ${nxt.home?"vs":"at"} <strong>${esc(nxt.opp)}</strong> · ${esc(nxt.loc)}`):"Nothing on the schedule yet.";
+  renderBanner();
 }
 
 // ---------- schedule ----------
+function eventRowHtml(g){
+  const p=dParts(g.date);
+  return `<div class="game event"><div class="gdate"><div class="m">${dow(g.date)} ${p.m}</div><div class="d">${p.d}</div></div>
+  <div class="gmain"><div class="gopp">${esc(g.opp)}</div><div class="gmeta">${[g.loc,g.time].filter(Boolean).map(esc).join(" · ")}</div></div>
+  <div class="gres"><span class="pill ev">Event</span><small>${canEdit?`<button class="linkbtn" data-edit="${g.id}">Edit</button>`:""}</small></div></div>`;
+}
 function gameRowHtml(g){
+  if(isEvent(g))return eventRowHtml(g);
   const p=dParts(g.date); let res="";
   if(g.status==="final"&&g.us!=null){const k=g.us>g.them?"w":g.us<g.them?"l":"t";res=`<span class="pill ${k}">${k.toUpperCase()}</span>${g.us}–${g.them}`;}
   else res=`<span class="pill up">${esc(g.time)}</span>`;
@@ -209,9 +222,9 @@ function gameRowHtml(g){
   <div class="gres">${res}<small>${actions}</small></div></div>`;
 }
 function renderSchedule(){
-  const t=today(), g=[...S.games].sort((a,b)=>a.date.localeCompare(b.date));
-  const up=g.filter(x=>x.status!=="final"&&x.date>=t), done=g.filter(x=>x.status==="final"||x.date<t).reverse();
-  $("#upcoming").innerHTML=up.map(gameRowHtml).join("")||`<p class="note" style="padding:12px 0">Nothing scheduled yet.${canEdit?" Add a game or import from Spond.":""}</p>`;
+  const t=today(), g=[...S.games,...S.events].sort((a,b)=>a.date.localeCompare(b.date)||String(a.time).localeCompare(String(b.time)));
+  const up=g.filter(x=>x.status!=="final"&&x.date>=t), done=g.filter(x=>!isEvent(x)&&(x.status==="final"||x.date<t)).reverse();
+  $("#upcoming").innerHTML=up.map(gameRowHtml).join("")||`<p class="note" style="padding:12px 0">${TEAM.announcement?esc(TEAM.announcement):"Nothing scheduled yet."}${canEdit?" Add a game or event, or paste a schedule.":""}</p>`;
   $("#results").innerHTML=done.map(gameRowHtml).join("")||`<p class="note" style="padding:12px 0">No games played yet.</p>`;
   $("#open-import").hidden=!aiEnabled;
   const sp=!!TEAM.spond_group;
@@ -223,8 +236,10 @@ function ago(ts){const m=Math.round((Date.now()-new Date(ts))/6e4);if(m<1)return
 async function reloadTeam(){const t=await q(sb.from("teams").select("*").eq("id",TEAM.id));if(t[0])Object.assign(TEAM,t[0]);await loadTeamData();render();}
 function syncSummary(r){const parts=[];if(r.added)parts.push(`${r.added} new`);if(r.updated)parts.push(`${r.updated} updated`);if(r.removed)parts.push(`${r.removed} cancelled game${r.removed>1?"s":""} removed`);return parts.length?`Synced: ${parts.join(", ")}.`:"Synced. No games found in Spond yet.";}
 let editingGame=null;
-function openGameForm(g){
-  editingGame=g?g.id:null;$("#game-form").hidden=false;$("#game-form-title").textContent=g?"Edit game":"Add game";
+function setFormKind(k){const ev=k==="event";$("#gf-kind").value=k;$("#gf-opp-label").textContent=ev?"What":"Opponent";$("#gf-opp").placeholder=ev?"Tryouts":"";$("#gf-home-wrap").hidden=ev;
+  $("#game-form-title").textContent=(editingGame?"Edit ":"Add ")+(ev?"event":"game");}
+function openGameForm(g,kind){
+  editingGame=g?g.id:null;$("#game-form").hidden=false;setFormKind(g?(isEvent(g)?"event":"game"):(kind||"game"));$("#gf-kind").disabled=!!(g&&!isEvent(g)&&S.lines[g.id]);
   $("#gf-date").value=g?g.date:today();$("#gf-time").value=g?g.time:"";$("#gf-opp").value=g?g.opp:"";$("#gf-home").value=g&&!g.home?"0":"1";$("#gf-loc").value=g?g.loc:"";
   $("#gf-delete").hidden=!g;setStatus($("#gf-status"),"");$("#gf-opp").focus();
 }
@@ -304,8 +319,14 @@ function renderAvail(){
 let editingPlayer=null;
 function renderRoster(){
   const T=batTotals(""),P=pitTotals("");
+  const hidden=rosterHidden();
+  $("#roster-hidden").hidden=!hidden;
+  if(hidden)$("#roster-hidden").textContent=canEdit?`This roster is hidden from the public until ${fmtWhen(TEAM.roster_reveal_at)}. You can see it because you're staff.`:`The roster will be posted ${fmtWhen(TEAM.roster_reveal_at)}.`;
+  if(TEAM.roster_reveal_at){const d=new Date(TEAM.roster_reveal_at);$("#rv-at").value=new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,16);}else $("#rv-at").value="";
   $("#roster").innerHTML=sortedPlayers().map(p=>{const b=T[p.id],q=P[p.id];
     return `<div class="card"><div class="jersey">${p.num}</div><div style="min-width:0;flex:1"><div class="nm">${plink(p)}</div>${isCoach?`<div class="ln">${b?`${fmt3(b.avg)} AVG · ${b.h} H · ${b.rbi} RBI`:"No at-bats yet"}</div>${q?`<div class="ln">${outsToIp(q.outs)} IP · ${fmt2(q.era)} ERA</div>`:""}`:""}${canEdit?`<button class="linkbtn" data-pedit="${p.id}">Edit</button>`:""}</div></div>`}).join("")||`<p class="note">No players yet.</p>`;
+  if(hidden&&!canEdit)$("#roster").innerHTML="";
+  $("#ts-school").value=TEAM.school||"";$("#ts-announce").value=TEAM.announcement||"";
   $("#ts-season").value=S.team.season||"";$("#ts-league").value=S.team.league||"";$("#ts-inn").value=inn();$("#ts-pmax").value=S.team.pitchMax||85;
   $("#ts-prest").value=fmtRest(restTiers());$("#ts-prules").value=presetFor(S.team.pitchMax,TEAM.pitch_rest&&TEAM.pitch_rest.length?TEAM.pitch_rest:null);
 }
@@ -721,7 +742,7 @@ $("#ad-add").onclick=async()=>{
 $("#nt-add").onclick=async()=>{
   const st=$("#nt-status");
   const lv=PITCH_PRESETS[$("#nt-level").value];
-  try{const r=await api("/api/admin",{action:"create_team",name:$("#nt-name").value.trim(),id:$("#nt-id").value.trim(),innings:$("#nt-level").value==="ll"?6:7,pitch_max:lv.max,pitch_rest:lv.rest});setStatus(st,"Team added. Opening it…","ok");location.href=teamLink(r.team.id);}
+  try{const r=await api("/api/admin",{action:"create_team",school:$("#nt-school").value.trim()||null,name:$("#nt-name").value.trim(),id:$("#nt-id").value.trim(),innings:$("#nt-level").value==="ll"?6:7,pitch_max:lv.max,pitch_rest:lv.rest});setStatus(st,"Team added. Opening it…","ok");location.href=teamLink(r.team.id);}
   catch(e){setStatus(st,e.message,"err");}
 };
 $("#lg-up").onclick=async()=>{
@@ -1123,6 +1144,33 @@ $("#gd-out").addEventListener("click",e=>{
   if(e.target.id==="gd-use"&&gdPlan){const rest=curLineup.order.filter(id=>!gdPlan.order.includes(id));curLineup.order=[...gdPlan.order,...rest];renderLineup();rebuildTables();$("#gd-out").innerHTML=`<p class="status ok">Batting order updated. Press Save lineup to keep it.</p>`;gdPlan=null;}
 });
 
+// ---------- announcements and roster reveal ----------
+const rosterHidden=()=>!!(TEAM&&TEAM.roster_reveal_at&&new Date(TEAM.roster_reveal_at)>new Date());
+const fmtWhen=t=>new Date(t).toLocaleString(undefined,{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});
+function countdown(t){let s=Math.max(0,Math.round((new Date(t)-new Date())/1000));const d=Math.floor(s/86400);s%=86400;const h=Math.floor(s/3600);s%=3600;const m=Math.floor(s/60);
+  return d?`${d} day${d>1?"s":""}, ${h} hr`:h?`${h} hr ${m} min`:`${m} min ${s%60} sec`;}
+let bannerTimer=null;
+function renderBanner(){
+  const b=$("#team-banner");if(!TEAM){b.hidden=true;return;}
+  const parts=[];
+  if(rosterHidden())parts.push(`<b>Rosters post ${esc(fmtWhen(TEAM.roster_reveal_at))}</b><span class="cd" id="cd">${countdown(TEAM.roster_reveal_at)}</span>`);
+  else if(TEAM.roster_reveal_at&&new Date()-new Date(TEAM.roster_reveal_at)<14*864e5)parts.push(`<b>The roster is posted.</b><a href="#roster">See who made the team</a>`);
+  if(TEAM.announcement)parts.push(`<span>${esc(TEAM.announcement)}</span>`);
+  b.hidden=!parts.length;b.innerHTML=parts.join("");
+  clearInterval(bannerTimer);
+  if(rosterHidden())bannerTimer=setInterval(async()=>{const el=$("#cd");if(el)el.textContent=countdown(TEAM.roster_reveal_at);
+    if(!rosterHidden()){clearInterval(bannerTimer);await loadTeamData();render();route();}},1000);
+}
+async function saveReveal(at,msg){
+  const st=$("#rv-status");
+  try{await q(sb.from("teams").update({roster_reveal_at:at}).eq("id",TEAM.id));TEAM.roster_reveal_at=at;setStatus(st,msg,"ok");logAct(msg);render();}
+  catch(e){setStatus(st,/roster_reveal_at/.test(e.message||"")?"Roster posting isn't set up yet. Run supabase/009_school_events_reveal.sql in Supabase.":errText(e),"err");}
+}
+$("#rv-save").onclick=()=>{const v=$("#rv-at").value;if(!v){setStatus($("#rv-status"),"Pick a date and time.","err");return;}const at=new Date(v);
+  if(at<=new Date()){setStatus($("#rv-status"),"That time has passed. Pick a future time, or use Post now.","err");return;}
+  saveReveal(at.toISOString(),`Roster will post ${fmtWhen(at)}`);};
+$("#rv-now").onclick=()=>saveReveal(new Date().toISOString(),"Roster posted");
+
 // ---------- routing ----------
 const VIEWS=["schedule","live","stats","roster","photos","scorebook","sheet","admin","signin","account","teams","player"];
 function route(){
@@ -1157,44 +1205,58 @@ window.addEventListener("hashchange",route);
 document.addEventListener("click",e=>{
   const t=e.target.closest("[data-box],[data-edit],[data-enter],[data-pedit],[data-st],th[data-k]");if(!t)return;
   if(t.dataset.box){location.hash="#stats";$("#stat-game").value=t.dataset.box;renderStats();}
-  else if(t.dataset.edit)openGameForm(S.games.find(g=>g.id===t.dataset.edit));
+  else if(t.dataset.edit)openGameForm(findItem(t.dataset.edit));
   else if(t.dataset.enter){pendingEnter=t.dataset.enter;if(location.hash==="#scorebook")route();else location.hash="#scorebook";}
   else if(t.dataset.pedit){const p=S.players.find(p=>p.id===t.dataset.pedit);editingPlayer=p.id;$("#player-form").hidden=false;$("#pf-name").value=p.name;$("#pf-num").value=p.num;$("#pf-delete").hidden=false;}
   else if(t.dataset.st){statType=t.dataset.st;$$("[data-st]").forEach(b=>b.setAttribute("aria-pressed",b===t));renderStats();}
   else if(t.dataset.k){const k=t.dataset.k;if(sortKey[statType]===k)sortDir[statType]*=-1;else{sortKey[statType]=k;sortDir[statType]=(statType==="pit"&&["era","whip","h","r","er","bb"].includes(k))?1:-1;}renderStats();}
 });
 $("#stat-game").addEventListener("change",renderStats);
-$("#add-game").onclick=()=>openGameForm(null);
+$("#add-game").onclick=()=>openGameForm(null,"game");
+$("#add-event").onclick=()=>openGameForm(null,"event");
+$("#gf-kind").addEventListener("change",e=>setFormKind(e.target.value));
 $("#gf-cancel").onclick=()=>{$("#game-form").hidden=true};
 $("#gf-save").onclick=async()=>{
-  const d=$("#gf-date").value,o=$("#gf-opp").value.trim();if(!d||!o){setStatus($("#gf-status"),"Add a date and an opponent.","err");return;}
-  const g=editingGame?{...S.games.find(x=>x.id===editingGame)}:{id:uuid(),status:"scheduled",us:null,them:null,lineup:null};
-  Object.assign(g,{date:d,time:$("#gf-time").value.trim(),opp:o,home:$("#gf-home").value==="1",loc:$("#gf-loc").value.trim()});
-  if(await run($("#gf-status"),`${editingGame?"Updated":"Added"} game ${g.home?"vs":"at"} ${o}`,()=>q(sb.from("games").upsert(gameRow(g))))){
-    const i=S.games.findIndex(x=>x.id===g.id);if(i>=0)S.games[i]=g;else S.games.push(g);render();$("#game-form").hidden=true;}
+  const ev=$("#gf-kind").value==="event";
+  const d=$("#gf-date").value,o=$("#gf-opp").value.trim();if(!d||!o){setStatus($("#gf-status"),ev?"Add a date and what the event is.":"Add a date and an opponent.","err");return;}
+  const g=editingGame?{...findItem(editingGame)}:{id:uuid(),status:"scheduled",us:null,them:null,lineup:null};
+  Object.assign(g,{date:d,time:$("#gf-time").value.trim(),opp:o,home:ev?true:$("#gf-home").value==="1",loc:$("#gf-loc").value.trim(),kind:ev?"event":"game"});
+  const row=gameRow(g);if(!ev&&editingGame)row.kind="game";
+  if(await run($("#gf-status"),`${editingGame?"Updated":"Added"} ${ev?`event ${o}`:`game ${g.home?"vs":"at"} ${o}`}`,()=>q(sb.from("games").upsert(row)))){
+    putItem(g);render();$("#game-form").hidden=true;}
 };
 let pendingGameDel=false;
 $("#gf-delete").onclick=async()=>{
-  if(!pendingGameDel){pendingGameDel=true;$("#gf-delete").textContent="Tap again to delete";setTimeout(()=>{pendingGameDel=false;$("#gf-delete").textContent="Delete game";},4000);return;}
-  pendingGameDel=false;$("#gf-delete").textContent="Delete game";
-  if(await run($("#gf-status"),"Deleted a game",()=>q(sb.from("games").delete().eq("id",editingGame)))){S.games=S.games.filter(g=>g.id!==editingGame);delete S.lines[editingGame];render();$("#game-form").hidden=true;}
+  if(!pendingGameDel){pendingGameDel=true;$("#gf-delete").textContent="Tap again to delete";setTimeout(()=>{pendingGameDel=false;$("#gf-delete").textContent="Delete";},4000);return;}
+  pendingGameDel=false;$("#gf-delete").textContent="Delete";
+  if(await run($("#gf-status"),"Deleted from the schedule",()=>q(sb.from("games").delete().eq("id",editingGame)))){S.games=S.games.filter(g=>g.id!==editingGame);S.events=S.events.filter(g=>g.id!==editingGame);delete S.lines[editingGame];render();$("#game-form").hidden=true;}
 };
 $("#open-import").onclick=()=>{$("#import-panel").hidden=!$("#import-panel").hidden;};
 let importRows=[];
 $("#run-import").onclick=async()=>{
-  const txt=$("#import-text").value.trim(),st=$("#import-status");if(!txt){setStatus(st,"Paste the Spond events first.","err");return;}
-  setStatus(st,"Reading events…");$("#run-import").disabled=true;
+  const txt=$("#import-text").value.trim(),st=$("#import-status");if(!txt){setStatus(st,"Paste the schedule first.","err");return;}
+  setStatus(st,"Reading the schedule…");$("#run-import").disabled=true;
   try{
-    const out=await ai(`You are reading a youth baseball team's schedule copied from the Spond app. Today is ${today()}. Extract every game (skip practices unless no games exist). Return ONLY JSON: {"games":[{"date":"YYYY-MM-DD","time":"h:mm","opp":"opponent team name","home":true,"loc":"field or park name"}]}. Infer the year from context; if missing, use the next occurrence on or after today. If home/away is unclear, use true.\n\nTEXT:\n${txt}`);
-    importRows=(out&&out.games||[]).filter(g=>/^\d{4}-\d{2}-\d{2}$/.test(g.date));
-    $("#import-preview").innerHTML=importRows.length?`<div class="tbl-wrap"><table><thead><tr><th class="l">Date</th><th class="l">Time</th><th class="l">Opponent</th><th class="l">Home</th><th class="l">Field</th></tr></thead><tbody>${importRows.map(g=>`<tr><td class="l">${g.date}</td><td class="l">${esc(g.time)}</td><td class="l">${esc(g.opp)}</td><td class="l">${g.home?"Home":"Away"}</td><td class="l">${esc(g.loc)}</td></tr>`).join("")}</tbody></table></div><div class="row" style="margin-top:10px"><button class="primary" id="import-add" type="button">Add ${importRows.length} games</button></div>`:"";
-    setStatus(st,importRows.length?"Check these before adding.":"No games found in that text.",importRows.length?"":"err");
+    const out=await ai(`You are reading a baseball team's schedule that a coach copied from somewhere (an email, a spreadsheet, a school website, or the Spond app). Today is ${today()}. The team is ${S.team.name}${TEAM.school?` (${TEAM.school})`:""}.
+Extract every game, and every other team event worth putting on a family calendar (tryouts, parent meetings, picture day, banquets, scrimmages that are not official games). Skip routine practices unless there are no games at all.
+Return ONLY JSON: {"items":[{"type":"game","date":"YYYY-MM-DD","time":"3:30 PM","opp":"opponent team name","home":true,"loc":"field or school"},{"type":"event","date":"YYYY-MM-DD","time":"","title":"Tryouts","loc":""}]}.
+Infer the year from context; if missing, use the next occurrence on or after today. If home/away is unclear, use true. Leave time empty if none is given.
+
+TEXT:
+${txt}`);
+    importRows=(out&&(out.items||out.games)||[]).filter(g=>/^\d{4}-\d{2}-\d{2}$/.test(g.date)).map(g=>g.type==="event"?{...g,kind:"event",opp:g.title||g.opp||"Team event",home:true}:{...g,kind:"game"});
+    const nG=importRows.filter(g=>g.kind==="game").length,nE=importRows.length-nG;
+    $("#import-preview").innerHTML=importRows.length?`<div class="tbl-wrap"><table><thead><tr><th class="l">Date</th><th class="l">Time</th><th class="l">What</th><th class="l">Home</th><th class="l">Where</th></tr></thead><tbody>${importRows.map(g=>`<tr><td class="l">${g.date}</td><td class="l">${esc(g.time)}</td><td class="l">${g.kind==="event"?`<span class="pill ev">Event</span>`:""}${esc(g.opp)}</td><td class="l">${g.kind==="event"?"":g.home?"Home":"Away"}</td><td class="l">${esc(g.loc)}</td></tr>`).join("")}</tbody></table></div><div class="row" style="margin-top:10px"><button class="primary" id="import-add" type="button">Add ${[nG?`${nG} game${nG>1?"s":""}`:"",nE?`${nE} event${nE>1?"s":""}`:""].filter(Boolean).join(" and ")}</button></div>`:"";
+    setStatus(st,importRows.length?"Check these before adding.":"Nothing found in that text.",importRows.length?"":"err");
   }catch(e){setStatus(st,e.message,"err");}
   finally{$("#run-import").disabled=false;}
 };
 document.addEventListener("click",async e=>{if(e.target.id!=="import-add")return;
-  const add=importRows.filter(g=>!S.games.some(x=>x.date===g.date&&x.opp.toLowerCase()===String(g.opp).toLowerCase())).map(g=>({id:uuid(),date:g.date,time:g.time||"",opp:g.opp||"TBD",home:g.home!==false,loc:g.loc||"",status:"scheduled",us:null,them:null,lineup:null}));
-  if(await run($("#import-status"),`Imported ${add.length} games from Spond`,()=>q(sb.from("games").insert(add.map(gameRow))))){S.games.push(...add);render();$("#import-preview").innerHTML="";$("#import-text").value="";}
+  const all=[...S.games,...S.events];
+  const add=importRows.filter(g=>!all.some(x=>x.date===g.date&&x.opp.toLowerCase()===String(g.opp).toLowerCase())).map(g=>({id:uuid(),date:g.date,time:g.time||"",opp:g.opp||"TBD",home:g.home!==false,loc:g.loc||"",status:"scheduled",us:null,them:null,lineup:null,kind:g.kind}));
+  if(!add.length){setStatus($("#import-status"),"Everything here is already on the schedule.","ok");return;}
+  if(await run($("#import-status"),`Added ${add.length} schedule item${add.length>1?"s":""}`,()=>q(sb.from("games").insert(add.map(g=>({...gameRow(g),kind:g.kind}))))))
+    {add.forEach(putItem);render();$("#import-preview").innerHTML="";$("#import-text").value="";}
 });
 $("#add-player").onclick=()=>{editingPlayer=null;$("#player-form").hidden=false;$("#pf-name").value="";$("#pf-num").value="";$("#pf-delete").hidden=true;$("#pf-name").focus();};
 $("#pf-cancel").onclick=()=>{$("#player-form").hidden=true};
@@ -1210,7 +1272,8 @@ $("#pf-delete").onclick=async()=>{ // keep stats history: mark inactive instead 
 $("#ts-save").onclick=async()=>{
   const rest=parseRest($("#ts-prest").value);
   if(!rest||!rest.length){setStatus($("#ts-status"),"Write rest days like 66:4, 51:3 (pitches, then days).","err");return;}
-  const v={season:$("#ts-season").value.trim(),league:$("#ts-league").value.trim(),innings:Math.min(9,Math.max(4,+$("#ts-inn").value||6)),pitch_max:Math.min(150,Math.max(20,+$("#ts-pmax").value||85)),pitch_rest:rest};
+  const v={season:$("#ts-season").value.trim(),league:$("#ts-league").value.trim(),innings:Math.min(9,Math.max(4,+$("#ts-inn").value||6)),pitch_max:Math.min(150,Math.max(20,+$("#ts-pmax").value||85)),pitch_rest:rest,
+    school:$("#ts-school").value.trim()||null,announcement:$("#ts-announce").value.trim()||null};
   if(await run($("#ts-status"),"Updated team settings",()=>q(sb.from("teams").update(v).eq("id",TEAM.id)))){Object.assign(TEAM,v);Object.assign(S.team,{season:v.season,league:v.league,innings:v.innings,pitchMax:v.pitch_max});render();}
 };
 $("#ts-prules").addEventListener("change",e=>{const p=PITCH_PRESETS[e.target.value];if(!p)return;$("#ts-pmax").value=p.max;$("#ts-prest").value=fmtRest(p.rest);if(e.target.value!=="ll")$("#ts-inn").value=7;});
@@ -1515,10 +1578,13 @@ async function boot(){
   if(TEAM&&!(CFG.hostTeams||{})[location.hostname]&&location.pathname!=="/"+TEAM.id){try{history.replaceState(null,"","/"+encodeURIComponent(TEAM.id)+(location.hash||"#schedule"));}catch(e){}}
   if(!TEAM){
     if(pick)try{history.replaceState(null,"","/");}catch(e){}
-    $("#teampick").innerHTML=teams.map(t=>`<a href="${teamLink(t.id)}"><img src="${logoUrl(t)}" alt="" onerror="this.remove()"><b>${esc(t.name)}</b></a>`).join("")||`<p class="note">No teams yet. Run the database setup first.</p>`;
+    const card=t=>`<a href="${teamLink(t.id)}"><img src="${logoUrl(t)}" alt="" onerror="this.remove()"><b>${esc(t.name)}</b></a>`;
+    const groups={};for(const t of teams)(groups[t.school||""]=groups[t.school||""]||[]).push(t);
+    $("#teampick").innerHTML=Object.entries(groups).sort(([a],[b])=>(a===""?1:0)-(b===""?1:0)||a.localeCompare(b)).map(([s,ts])=>`<div class="school">${s?`<h3>${esc(s)}</h3>`:Object.keys(groups).length>1?`<h3>Other teams</h3>`:""}<div class="teampick">${ts.map(card).join("")}</div></div>`).join("")||`<p class="note">No teams yet. Run the database setup first.</p>`;
     $("header.band").hidden=true;$("nav.tabs").hidden=true;route();return;
   }
   lsSet("rr-team",TEAM.id);
+  $("#school-list").innerHTML=[...new Set(teams.map(t=>t.school).filter(Boolean))].map(s=>`<option value="${esc(s)}">`).join("");
   await loadTeamData();
   // Show the public schedule and stats right away; sign-in state fills in after.
   render();route();

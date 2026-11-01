@@ -36,9 +36,10 @@ export async function onRequestPost({ request, env }) {
     const id = String(body.id || "").toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
     if (!id || !body.name) return json({ error: "Give the team a name and a short web name." }, 400);
     if (["api", "logos", "app", "config", "index"].includes(id)) return json({ error: "That web name is reserved. Pick another." }, 400);
-    const row = { id, name: body.name, season: body.season || "", league: body.league || "", innings: body.innings || 6, pitch_max: body.pitch_max || 85, pitch_rest: body.pitch_rest || null };
+    const row = { id, name: body.name, season: body.season || "", league: body.league || "", innings: body.innings || 6, pitch_max: body.pitch_max || 85, pitch_rest: body.pitch_rest || null, school: body.school || null };
     let r = await rest("teams", { method: "POST", body: JSON.stringify(row) });
-    if (!r.ok && r.status !== 409) { delete row.pitch_rest; r = await rest("teams", { method: "POST", body: JSON.stringify(row) }); } // before 004_multi_team.sql is run
+    if (!r.ok && r.status !== 409) { delete row.school; r = await rest("teams", { method: "POST", body: JSON.stringify(row) }); } // before 009 is run
+    if (!r.ok && r.status !== 409) { delete row.pitch_rest; r = await rest("teams", { method: "POST", body: JSON.stringify(row) }); } // before 004 is run
     if (!r.ok) return json({ error: r.status === 409 ? "That web name is taken. Pick another." : "Couldn't create the team." }, 400);
     return json({ ok: true, team: (await r.json())[0] });
   }

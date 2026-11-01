@@ -292,3 +292,12 @@ body:not(.is-coach) .coach-only{display:none!important}
 .wu-edit textarea{min-height:70px}
 .wu-edit fieldset{border:1px solid var(--line);padding:8px;display:flex;flex-direction:column;gap:6px}
 .ai-card .row button{font-size:13px;padding:5px 10px}
+
+/* ---- banner, events, school groups ---- */
+.team-banner{background:var(--soft);border-left:4px solid var(--red);padding:10px 14px;margin-bottom:18px;display:flex;flex-direction:column;gap:4px}
+.team-banner b{font-family:var(--f-head);text-transform:uppercase;letter-spacing:.04em;font-size:18px}
+.team-banner .cd{font-family:var(--f-head);font-weight:800;font-size:26px;font-variant-numeric:tabular-nums}
+.game.event .gopp{font-weight:600}
+.pill.ev{background:var(--fg);color:var(--bg)}
+.school h3{margin-bottom:8px}
+.school .teampick{margin-bottom:6px}

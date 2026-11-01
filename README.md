@@ -86,6 +86,13 @@ Run `supabase/008_living_writeups.sql` once.
 - **Season review** looks back over every version; **Team review** (Stats tab) reads all write-ups and suggests a practice plan.
 - Uploads can be AI-reviewed automatically (only for players whose family OK box is checked).
 
+### 10. Schools, events, roster posting
+Run `supabase/009_school_events_reveal.sql` once.
+- Squads (Varsity, JV, Frosh) are separate teams with the same **School or program**; the team list groups them.
+- The schedule holds games and other events (tryouts, meetings); events never count in stats. **Paste a schedule** reads any pasted text.
+- **Roster posting** (Roster tab, coaches) hides the roster from visitors until a set time, enforced by the database; visitors see a countdown.
+- **Announcement banner** in Team settings shows on the team's pages (good for the off-season).
+
 ### Later: your own web address
 In the Worker, **Settings > Domains & Routes > Add > Custom domain**. For one address per team, add each one and map it in `config.js`:
 ```js

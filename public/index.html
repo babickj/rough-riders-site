@@ -36,27 +36,29 @@
 </div></nav>
 
 <main class="wrap">
+  <div id="team-banner" class="team-banner" hidden></div>
   <section id="v-schedule" class="stack" hidden>
     <div class="sec-head"><h2>Schedule</h2>
-      <span class="row edit-only"><button type="button" id="add-game">Add game</button><button type="button" id="sp-sync" hidden>Sync with Spond</button><button type="button" id="open-import">Paste from Spond</button></span></div>
+      <span class="row edit-only"><button type="button" id="add-game">Add game</button><button type="button" id="add-event">Add event</button><button type="button" id="sp-sync" hidden>Sync with Spond</button><button type="button" id="open-import">Paste a schedule</button></span></div>
     <p class="note" id="sp-line" hidden></p>
     <div id="import-panel" class="panel edit-only" hidden>
-      <h3>Import from Spond</h3>
-      <p class="note">In Spond, open the team's event list, select the text of the upcoming games, and paste it here. Claude reads the dates, times, opponents, and fields and shows them for you to check before adding.</p>
-      <textarea id="import-text" placeholder="Paste Spond events here"></textarea>
-      <div class="row"><button class="primary" type="button" id="run-import">Read events</button><span class="status" id="import-status"></span></div>
+      <h3>Paste a schedule</h3>
+      <p class="note">Copy the schedule from anywhere (an email, a spreadsheet, the school's website, or Spond) and paste it here. The AI picks out the games and other events like tryouts and meetings, with dates, times, opponents, and fields, and shows them for you to check before anything is added.</p>
+      <textarea id="import-text" placeholder="Paste the schedule here"></textarea>
+      <div class="row"><button class="primary" type="button" id="run-import">Read schedule</button><span class="status" id="import-status"></span></div>
       <div id="import-preview"></div>
     </div>
     <div id="game-form" class="panel edit-only" hidden>
       <h3 id="game-form-title">Add game</h3>
       <div class="row">
+        <label class="f">Type<select id="gf-kind"><option value="game">Game</option><option value="event">Other event</option></select></label>
         <label class="f">Date<input type="date" id="gf-date"></label>
         <label class="f">Time<input type="text" id="gf-time" placeholder="10:00" style="width:90px"></label>
-        <label class="f">Opponent<input type="text" id="gf-opp"></label>
-        <label class="f">Home/Away<select id="gf-home"><option value="1">Home</option><option value="0">Away</option></select></label>
+        <label class="f"><span id="gf-opp-label">Opponent</span><input type="text" id="gf-opp"></label>
+        <label class="f" id="gf-home-wrap">Home/Away<select id="gf-home"><option value="1">Home</option><option value="0">Away</option></select></label>
         <label class="f">Field<input type="text" id="gf-loc"></label>
       </div>
-      <div class="row"><button class="primary" type="button" id="gf-save">Save game</button><button type="button" id="gf-cancel">Cancel</button><button type="button" id="gf-delete" hidden>Delete game</button><span class="status" id="gf-status"></span></div>
+      <div class="row"><button class="primary" type="button" id="gf-save">Save</button><button type="button" id="gf-cancel">Cancel</button><button type="button" id="gf-delete" hidden>Delete</button><span class="status" id="gf-status"></span></div>
     </div>
     <div>
       <h3 style="margin-bottom:8px">Upcoming</h3>
@@ -97,11 +99,24 @@
         <button class="primary" type="button" id="pf-save">Save player</button><button type="button" id="pf-cancel">Cancel</button><button type="button" id="pf-delete" hidden>Remove</button>
       </div>
     </div>
+    <div class="panel coach-only" id="reveal-panel">
+      <h3>Roster posting</h3>
+      <p class="note">Keep the roster hidden from the public while you work on it, and post it at a set time. Coaches and scorekeepers always see it. Visitors see a countdown until then.</p>
+      <div class="row">
+        <label class="f">Post roster at<input type="datetime-local" id="rv-at"></label>
+        <button type="button" class="primary" id="rv-save">Schedule posting</button>
+        <button type="button" id="rv-now">Post now</button>
+      </div>
+      <span class="status" id="rv-status"></span>
+    </div>
+    <p class="note" id="roster-hidden" hidden></p>
     <div class="roster" id="roster"></div>
     <p class="note">Players are listed by first name and jersey number only. Keep last names off the site.</p>
     <div class="panel edit-only">
       <h3>Team settings</h3>
+      <label class="f">Announcement banner (optional)<input type="text" id="ts-announce" maxlength="200" placeholder="Season starts in February. Tryouts Feb 10, 3:30 PM at the varsity field."></label>
       <div class="row">
+        <label class="f">School or program<input type="text" id="ts-school" list="school-list" placeholder="Otay Ranch HS"></label>
         <label class="f">Season<input type="text" id="ts-season"></label>
         <label class="f">Division<input type="text" id="ts-league"></label>
         <label class="f">Innings per game<input type="number" id="ts-inn" min="4" max="9" style="width:80px"></label>
@@ -297,7 +312,8 @@
 
   <section id="v-teams" class="stack" hidden>
     <div class="sec-head"><h2>Pick your team</h2></div>
-    <div class="teampick" id="teampick"></div>
+    <div class="stack" id="teampick"></div>
+    <datalist id="school-list"></datalist>
   </section>
 
   <section id="v-live" class="stack" hidden>
@@ -339,7 +355,8 @@
       <h3>Teams</h3>
       <div id="ad-teamlist"></div>
       <div class="row">
-        <label class="f">Team name<input type="text" id="nt-name" placeholder="Eastlake HS"></label>
+        <label class="f">School or program<input type="text" id="nt-school" list="school-list" placeholder="Otay Ranch HS"></label>
+        <label class="f">Team name<input type="text" id="nt-name" placeholder="Otay Ranch Varsity"></label>
         <label class="f">Web name<input type="text" id="nt-id" placeholder="eastlake"></label>
         <label class="f">Level<select id="nt-level"><option value="ll">Little League</option><option value="cif-v">High school varsity (CIF)</option><option value="cif-jv">High school JV / frosh (CIF)</option></select></label>
         <button type="button" id="nt-add">Add team</button>
