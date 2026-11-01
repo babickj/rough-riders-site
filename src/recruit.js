@@ -26,7 +26,9 @@ export async function onRequestGet({ request, env }) {
   if (!/^[A-Za-z0-9_-]{16,64}$/.test(t)) return json({ error: "This profile link isn't valid." }, 404);
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) return json({ error: "The site isn't configured yet." }, 501);
   const { base, h, q } = db(env);
-  const prof = (await q(`recruit_profiles?share_token=eq.${enc(t)}&enabled=eq.true&select=*`))[0];
+  let prof;
+  try { prof = (await q(`recruit_profiles?share_token=eq.${enc(t)}&enabled=eq.true&select=*`))[0]; }
+  catch { return json({ error: "This profile isn't available right now." }, 404); }
   if (!prof) return json({ error: "This profile isn't available. The link may have been turned off." }, 404);
   const pid = prof.player_id, team = (await q(`teams?id=eq.${enc(prof.team_id)}&select=name,school,season,league,innings`))[0] || {};
   const player = (await q(`players?id=eq.${enc(pid)}&select=name,num`))[0] || {};
