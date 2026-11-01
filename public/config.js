@@ -4,7 +4,7 @@
 // SUPABASE_SERVICE_ROLE_KEY and must stay secret.
 window.RR_CONFIG = {
   supabaseUrl: "https://yukrkkinhswqbviyhmwx.supabase.co",
-  supabaseAnonKey: "PASTE_SUPABASE_PUBLISHABLE_KEY",
+  supabaseAnonKey: "sb_publishable_MlCpoccZftsBpSnqku7jmw_NQOW-1n9",
   // Later, map your own web addresses to teams, e.g.
   // hostTeams: { "riders.example.com": "rough-riders", "team2.example.com": "team-two" },
   hostTeams: {}
