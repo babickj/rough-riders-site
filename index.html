@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Rough Riders Baseball</title>
+<meta name="theme-color" content="#0B0B0C">
+<link rel="icon" href="/logos/rough-riders.jpg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700;800&display=swap">
+<link rel="stylesheet" href="/app.css">
+<style>:root{color-scheme:light;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}body:not(.is-member) .member-only{display:none!important}</style>
+</head>
+<body>
+<header class="band">
+  <div class="wrap">
+    <img class="logo" id="logo" src="" alt="">
+    <div class="band-info">
+      <div class="eyebrow" id="h-season">Little League</div>
+      <div class="record" id="h-record"></div>
+      <div class="next" id="h-next"></div>
+    </div>
+    <div class="acct" id="acct" aria-live="polite"></div>
+  </div>
+</header>
+<nav class="tabs" aria-label="Sections"><div class="wrap">
+  <a href="#schedule" data-v="schedule">Schedule</a>
+  <a href="#live" data-v="live">Live</a>
+  <a href="#stats" data-v="stats">Stats</a>
+  <a href="#roster" data-v="roster">Roster</a>
+  <a href="#photos" data-v="photos">Photos</a>
+  <a href="#scorebook" data-v="scorebook" class="edit-only">Enter game</a>
+  <a href="#sheet" data-v="sheet" class="edit-only">Scoresheet</a>
+  <a href="#admin" data-v="admin" class="owner-only">Admin</a>
+  <a href="#signin" data-v="signin" id="nav-signin" class="acct-link">Sign in</a>
+</div></nav>
+
+<main class="wrap">
+  <section id="v-schedule" class="stack" hidden>
+    <div class="sec-head"><h2>Schedule</h2>
+      <span class="row edit-only"><button type="button" id="add-game">Add game</button><button type="button" id="open-import">Import from Spond</button></span></div>
+    <div id="import-panel" class="panel edit-only" hidden>
+      <h3>Import from Spond</h3>
+      <p class="note">In Spond, open the team's event list, select the text of the upcoming games, and paste it here. Claude reads the dates, times, opponents, and fields and shows them for you to check before adding.</p>
+      <textarea id="import-text" placeholder="Paste Spond events here"></textarea>
+      <div class="row"><button class="primary" type="button" id="run-import">Read events</button><span class="status" id="import-status"></span></div>
+      <div id="import-preview"></div>
+    </div>
+    <div id="game-form" class="panel edit-only" hidden>
+      <h3 id="game-form-title">Add game</h3>
+      <div class="row">
+        <label class="f">Date<input type="date" id="gf-date"></label>
+        <label class="f">Time<input type="text" id="gf-time" placeholder="10:00" style="width:90px"></label>
+        <label class="f">Opponent<input type="text" id="gf-opp"></label>
+        <label class="f">Home/Away<select id="gf-home"><option value="1">Home</option><option value="0">Away</option></select></label>
+        <label class="f">Field<input type="text" id="gf-loc"></label>
+      </div>
+      <div class="row"><button class="primary" type="button" id="gf-save">Save game</button><button type="button" id="gf-cancel">Cancel</button><button type="button" id="gf-delete" hidden>Delete game</button><span class="status" id="gf-status"></span></div>
+    </div>
+    <div>
+      <h3 style="margin-bottom:8px">Upcoming</h3>
+      <div class="games" id="upcoming"></div>
+    </div>
+    <div>
+      <h3 style="margin-bottom:8px">Results</h3>
+      <div class="games" id="results"></div>
+    </div>
+  </section>
+
+  <section id="v-stats" class="stack" hidden>
+    <div class="sec-head"><h2>Season stats</h2>
+      <div class="seg" role="group" aria-label="Stat type"><button type="button" data-st="bat" aria-pressed="true">Batting</button><button type="button" data-st="pit" aria-pressed="false">Pitching</button><button type="button" data-st="fld" aria-pressed="false">Fielding</button></div></div>
+    <div class="row"><label class="f">Game<select id="stat-game"><option value="">Whole season</option></select></label></div>
+    <div class="tbl-wrap"><table id="stat-table"></table></div>
+    <p class="note" id="stat-note"></p>
+    <div>
+      <div class="sec-head" style="margin-bottom:8px"><h3>Pitcher availability today</h3></div>
+      <div class="avail" id="avail"></div>
+      <p class="note" style="margin-top:8px">Rest days follow Little League pitch-count rules for ages 7–16: 66 or more pitches needs 4 days, 51–65 needs 3, 36–50 needs 2, 21–35 needs 1. Daily maximums depend on age (75 for ages 9–10, 85 for 11–12). Check the current rulebook if your league changes them.</p>
+    </div>
+  </section>
+
+  <section id="v-roster" class="stack" hidden>
+    <div class="sec-head"><h2>Roster</h2><button type="button" class="edit-only" id="add-player">Add player</button></div>
+    <div id="player-form" class="panel edit-only" hidden>
+      <div class="row">
+        <label class="f">First name<input type="text" id="pf-name"></label>
+        <label class="f">Jersey #<input type="number" id="pf-num" style="width:80px" min="0" max="99"></label>
+        <button class="primary" type="button" id="pf-save">Save player</button><button type="button" id="pf-cancel">Cancel</button><button type="button" id="pf-delete" hidden>Remove</button>
+      </div>
+    </div>
+    <div class="roster" id="roster"></div>
+    <p class="note">Players are listed by first name and jersey number only. Keep last names off the site.</p>
+    <div class="panel edit-only">
+      <h3>Team settings</h3>
+      <div class="row">
+        <label class="f">Season<input type="text" id="ts-season"></label>
+        <label class="f">Division<input type="text" id="ts-league"></label>
+        <label class="f">Innings per game<input type="number" id="ts-inn" min="4" max="9" style="width:80px"></label>
+        <label class="f">Daily pitch limit<input type="number" id="ts-pmax" min="20" max="105" style="width:90px"></label>
+        <button type="button" id="ts-save">Save settings</button><span class="status" id="ts-status"></span>
+      </div>
+    </div>
+  </section>
+
+  <section id="v-scorebook" class="stack edit-only" hidden>
+    <div class="sec-head"><h2>Enter game</h2></div>
+    <div class="row">
+      <label class="f">Game<select id="eg-game"></select></label>
+      <label class="f">Our runs<input type="number" id="eg-us" min="0" style="width:80px"></label>
+      <label class="f">Their runs<input type="number" id="eg-them" min="0" style="width:80px"></label>
+    </div>
+    <div class="panel">
+      <div class="sec-head" style="margin:0"><h3>Lineup for this game</h3><span class="row"><button type="button" id="lu-all">Everyone</button><button type="button" id="lu-save">Save lineup</button></span></div>
+      <p class="note">Check who is playing and set the batting order with the arrows. The stat tables and the printed scoresheet follow this lineup. Save it before the game to print a sheet with the right order.</p>
+      <ol class="lineup" id="lineup"></ol>
+      <span class="status" id="lu-status"></span>
+      <div id="lu-out"></div>
+    </div>
+    <div class="panel">
+      <h3>Read a scoresheet photo</h3>
+      <p class="note">Take a photo of the printed scoresheet (Scoresheet tab) and choose it here. Claude fills in the boxes below. Nothing saves until you check it and press Save game.</p>
+      <div class="row"><input type="file" id="scan-file" accept="image/*"><button class="primary" type="button" id="scan-run" disabled>Read photo</button></div>
+      <span class="status" id="scan-status"></span>
+      <img id="scan-img" class="scan-preview" alt="Scoresheet photo" hidden>
+    </div>
+    <div>
+      <h3 style="margin-bottom:8px">Batting</h3>
+      <div class="tbl-wrap entry"><table id="eb-table"></table></div>
+    </div>
+    <div>
+      <h3 style="margin-bottom:8px">Pitching</h3>
+      <p class="note" style="margin-bottom:6px">Innings use baseball notation: 2.1 is two innings and one out.</p>
+      <div class="tbl-wrap entry"><table id="ep-table"></table></div>
+    </div>
+    <div>
+      <h3 style="margin-bottom:8px">Fielding</h3>
+      <div class="tbl-wrap entry"><table id="ef-table"></table></div>
+    </div>
+    <div class="row"><button class="primary" type="button" id="eg-save">Save game</button><span class="status" id="eg-status"></span></div>
+  </section>
+
+  <section id="v-sheet" class="stack edit-only" hidden>
+    <div class="sec-head"><h2>Scoresheet</h2><button class="primary" type="button" id="sheet-print">Print sheet</button></div>
+    <div class="row"><label class="f">Game<select id="sh-game"></select></label></div>
+    <p class="note">Print this for the dugout. Keep tally marks in each box during the game and write the total in the corner. Names are pre-printed so the photo reader matches every line to the right player.</p>
+    <span class="status" id="sheet-status"></span>
+    <div class="tbl-wrap" style="border:0"><div class="sheet" id="sheet"></div></div>
+  </section>
+
+  <section id="v-signin" class="stack" hidden>
+    <div class="signin">
+      <img src="" alt="" class="signin-logo" id="si-logo">
+      <h2 id="si-title">Sign in</h2>
+      <p id="si-state" class="si-state"></p>
+      <form class="authbox" id="si-form">
+        <label class="f">Email<input type="email" id="si-email" autocomplete="username" required></label>
+        <label class="f">Password<input type="password" id="si-pw" autocomplete="current-password" required></label>
+        <button class="primary big" type="submit" id="si-go">Sign in</button>
+        <span class="status" id="si-status"></span>
+      </form>
+      <p class="note" id="si-help">Coaches and scorekeepers enter games and keep live score. Parents can sign in to see team photos and videos. Your team admin creates your account and gives you a temporary password. Forgot it? Ask your team admin to reset it.</p>
+      <p class="note">Schedule, results, stats, and the roster are open to everyone without signing in.</p>
+    </div>
+  </section>
+
+  <section id="v-account" class="stack" hidden>
+    <div class="sec-head"><h2>My account</h2></div>
+    <div class="panel">
+      <p id="ac-who"></p>
+      <form class="authbox" id="ac-form">
+        <h3>Change password</h3>
+        <label class="f">New password<input type="password" id="ac-pw1" autocomplete="new-password" minlength="8" required></label>
+        <label class="f">New password again<input type="password" id="ac-pw2" autocomplete="new-password" minlength="8" required></label>
+        <button class="primary" type="submit">Change password</button>
+        <span class="status" id="ac-status"></span>
+      </form>
+    </div>
+    <div><button type="button" id="ac-signout">Sign out</button></div>
+  </section>
+
+  <section id="v-photos" class="stack" hidden>
+    <div class="sec-head"><h2>Photos and videos</h2></div>
+    <p class="note" id="ph-note"></p>
+    <div class="panel member-only" id="ph-add">
+      <h3>Add photos</h3>
+      <div class="row">
+        <input type="file" id="ph-files" accept="image/*" multiple>
+        <label class="f">Game (optional)<select id="ph-game"></select></label>
+        <label class="f">Caption (optional)<input type="text" id="ph-cap" maxlength="140"></label>
+        <button class="primary" type="button" id="ph-upload">Upload</button>
+      </div>
+      <h3>Add a video</h3>
+      <p class="note">Upload the video to YouTube as Unlisted, then paste its link here. It plays right on this page and costs nothing to store.</p>
+      <div class="row">
+        <label class="f" style="flex:1;min-width:220px">YouTube link<input type="url" id="vd-url" placeholder="https://youtu.be/..."></label>
+        <label class="f">Caption (optional)<input type="text" id="vd-cap" maxlength="140"></label>
+        <button type="button" id="vd-add">Add video</button>
+      </div>
+      <span class="status" id="ph-status"></span>
+    </div>
+    <div class="gallery" id="gallery"></div>
+  </section>
+  <div class="lightbox" id="lightbox" hidden><img id="lb-img" alt=""></div>
+
+  <section id="v-teams" class="stack" hidden>
+    <div class="sec-head"><h2>Pick your team</h2></div>
+    <div class="teampick" id="teampick"></div>
+  </section>
+
+  <section id="v-live" class="stack" hidden>
+    <div class="sec-head"><h2>Live game</h2><label class="f">Game<select id="lv-game"></select></label></div>
+    <p class="note" id="lv-note" hidden></p>
+    <div id="lv-board"></div>
+    <div id="lv-ctrl" class="edit-only"></div>
+    <div><h3 style="margin-bottom:6px">Play by play</h3><ol class="plays" id="lv-log"></ol></div>
+  </section>
+  <div class="sheet-ov" id="lv-sheet" hidden><div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="lv-sheet-title" id="lv-sheet-card"></div></div>
+
+  <section id="v-admin" class="stack owner-only" hidden>
+    <div class="sec-head"><h2>Admin</h2></div>
+    <div class="panel">
+      <h3>People</h3>
+      <p class="note">Admins manage people and settings. Scorekeepers enter games and keep live score. Parents see photos and videos. Everyone else can see the schedule, stats, and roster without an account.</p>
+      <div class="tbl-wrap"><table class="members" id="ad-members"></table></div>
+      <span class="status" id="ad-mstatus"></span>
+      <div id="ad-pwbox" hidden class="banner"></div>
+    </div>
+    <div class="panel">
+      <h3>Add a person</h3>
+      <div class="row">
+        <label class="f">Name<input type="text" id="ad-name"></label>
+        <label class="f">Email<input type="email" id="ad-email"></label>
+        <label class="f">Role<select id="ad-role"><option value="parent">Parent</option><option value="scorekeeper">Scorekeeper</option><option value="admin">Admin</option></select></label>
+        <button class="primary" type="button" id="ad-add">Add person</button>
+      </div>
+      <p class="note">New accounts get a temporary password you can pass along. They can change it under My account. If the person already has an account from the other team, they keep their current password.</p>
+      <span class="status" id="ad-astatus"></span>
+    </div>
+    <div class="panel" id="ad-teams" hidden>
+      <h3>Teams</h3>
+      <div id="ad-teamlist"></div>
+      <div class="row">
+        <label class="f">Team name<input type="text" id="nt-name"></label>
+        <label class="f">Web name<input type="text" id="nt-id" placeholder="rough-riders-2"></label>
+        <button type="button" id="nt-add">Add team</button>
+      </div>
+      <span class="status" id="nt-status"></span>
+    </div>
+    <div class="panel">
+      <h3>Team logo</h3>
+      <div class="row"><input type="file" id="lg-file" accept="image/*"><button type="button" id="lg-up">Upload logo</button><span class="status" id="lg-status"></span></div>
+    </div>
+    <div class="panel">
+      <h3>Recent changes</h3>
+      <div class="tbl-wrap"><table id="ad-log"></table></div>
+      <p class="note" id="ad-log-note"></p>
+    </div>
+  </section>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="/config.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
