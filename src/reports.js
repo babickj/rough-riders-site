@@ -80,7 +80,7 @@ async function playerBundle(env, teamId, playerId) {
   const ctx = {
     team: { name: team.name, league: team.league || "", season: team.season || "", innings_per_game: innings, daily_pitch_limit: team.pitch_max || 85, rest_rules: tiers.map(([a, b]) => `${a}+ pitches: ${b} days rest`) },
     today: new Date().toISOString().slice(0, 10),
-    player: { first_name: player.name, jersey: player.num },
+    player: { first_name: player.name, jersey: player.num, primary_positions: player.pos_primary || [], backup_positions: player.pos_backup || [] },
     batting_team_games: aggBat(teamRows), batting_all_games: aggBat(rows),
     pitching_all_games: aggPit(rows, innings), fielding_all_games: aggFld(rows),
     by_month: Object.entries(months).map(([m, rs]) => ({ month: m, batting: aggBat(rs), pitching: aggPit(rs, innings) })),

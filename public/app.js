@@ -334,6 +334,24 @@ function renderAvail(){
 
 // ---------- roster ----------
 let editingPlayer=null;
+// ---------- positions (kids can have several primary and backup spots) ----------
+const posP=p=>Array.isArray(p&&p.pos_primary)?p.pos_primary:[], posB=p=>Array.isArray(p&&p.pos_backup)?p.pos_backup:[];
+const posSort=a=>[...a].sort((x,y)=>POS.indexOf(x)-POS.indexOf(y));
+function posLine(p){const a=posSort(posP(p)),b=posSort(posB(p));if(!a.length&&!b.length)return "";
+  return `<div class="posline">${a.map(x=>`<span class="pos pri">${x}</span>`).join("")}${b.map(x=>`<span class="pos bak">${x}</span>`).join("")}</div>`;}
+let pfPos={};
+function renderPosChips(){$("#pf-pos").innerHTML=POS.map(x=>{const v=pfPos[x]||"";return `<button type="button" data-pp="${x}" class="${v}" aria-label="${x}: ${v==="pri"?"primary":v==="bak"?"backup":"not set"}">${x}<small>${v==="pri"?"Primary":v==="bak"?"Backup":"&nbsp;"}</small></button>`}).join("");}
+$("#pf-pos").onclick=e=>{const b=e.target.closest("[data-pp]");if(!b)return;const x=b.dataset.pp;pfPos[x]=!pfPos[x]?"pri":pfPos[x]==="pri"?"bak":"";renderPosChips();};
+function setPosForm(p){pfPos={};posP(p).forEach(x=>pfPos[x]="pri");posB(p).forEach(x=>{if(!pfPos[x])pfPos[x]="bak";});renderPosChips();}
+function renderDepth(){
+  const t=$("#depth");if(!t)return;const ps=S.players.filter(p=>p.active!==false&&!p.call_up_of);
+  const nm=p=>`#${p.num} ${esc(p.name)}`;
+  t.innerHTML=`<thead><tr><th class="l" style="cursor:default">Pos</th><th class="l" style="cursor:default">Primary</th><th class="l" style="cursor:default">Backup</th></tr></thead><tbody>${POS.map(x=>{
+    const a=ps.filter(p=>posP(p).includes(x)),b=ps.filter(p=>posB(p).includes(x)&&!posP(p).includes(x));
+    return `<tr><td class="l"><b>${x}</b></td><td class="l ${a.length?"":"gap"}">${a.map(nm).join(", ")||"No one"}</td><td class="l ${a.length||b.length?"":"gap"}">${b.map(nm).join(", ")||"—"}</td></tr>`}).join("")}</tbody>`;
+  const none=ps.filter(p=>!posP(p).length&&!posB(p).length);
+  $("#depth-box").querySelector(".note").innerHTML=`Who plays where, from each player's primary and backup positions. Red means a position has no one listed.${none.length?` <b>No positions yet:</b> ${none.map(nm).join(", ")}.`:""}`;
+}
 function renderRoster(){
   const T=batTotals(""),P=pitTotals("");
   const hidden=rosterHidden();
@@ -341,8 +359,9 @@ function renderRoster(){
   if(hidden)$("#roster-hidden").textContent=canEdit?`This roster is hidden from the public until ${fmtWhen(TEAM.roster_reveal_at)}. You can see it because you're staff.`:`The roster will be posted ${fmtWhen(TEAM.roster_reveal_at)}.`;
   if(TEAM.roster_reveal_at){const d=new Date(TEAM.roster_reveal_at);$("#rv-at").value=new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,16);}else $("#rv-at").value="";
   $("#roster").innerHTML=sortedPlayers().map(p=>{const b=T[p.id],q=P[p.id];
-    return `<div class="card"><div class="jersey">${p.num}</div><div style="min-width:0;flex:1"><div class="nm">${plink(p)}</div>${isCoach?`<div class="ln">${b?`${fmt3(b.avg)} AVG · ${b.h} H · ${b.rbi} RBI`:"No at-bats yet"}</div>${q?`<div class="ln">${outsToIp(q.outs)} IP · ${fmt2(q.era)} ERA</div>`:""}`:""}${canEdit?`<button class="linkbtn" data-pedit="${p.id}">Edit</button>`:""}</div></div>`}).join("")||`<p class="note">No players yet.</p>`;
+    return `<div class="card"><div class="jersey">${p.num}</div><div style="min-width:0;flex:1"><div class="nm">${plink(p)}</div>${posLine(p)}${isCoach?`<div class="ln">${b?`${fmt3(b.avg)} AVG · ${b.h} H · ${b.rbi} RBI`:"No at-bats yet"}</div>${q?`<div class="ln">${outsToIp(q.outs)} IP · ${fmt2(q.era)} ERA</div>`:""}`:""}${canEdit?`<button class="linkbtn" data-pedit="${p.id}">Edit</button>`:""}</div></div>`}).join("")||`<p class="note">No players yet.</p>`;
   if(hidden&&!canEdit)$("#roster").innerHTML="";
+  renderDepth();
   $("#ts-school").value=TEAM.school||"";$("#ts-name").value=TEAM.name||"";$("#ts-announce").value=TEAM.announcement||"";
   $("#ts-season").value=S.team.season||"";$("#ts-league").value=S.team.league||"";$("#ts-inn").value=inn();$("#ts-pmax").value=S.team.pitchMax||85;
   $("#ts-prest").value=fmtRest(restTiers());$("#ts-prules").value=presetFor(S.team.pitchMax,TEAM.pitch_rest&&TEAM.pitch_rest.length?TEAM.pitch_rest:null);
@@ -583,7 +602,7 @@ function renderPlayer(pid){
   const inc=!hasOut||$("#pl-outside").checked, rows=playerLines(pid,inc);
   const B=aggBat(rows),P=aggPit(rows),F=aggFld(rows),last=lastOuting(pid);
   let rest="";if(last){const need=restDays(last.pc),d=new Date(last.date+"T12:00"),free=new Date(d);free.setDate(d.getDate()+need+1);const ok=new Date(today()+"T12:00")>=free;rest=`<span class="chip ${ok?"ok":"rest"}">${ok?"Available to pitch":"Rest until "+MON[free.getMonth()]+" "+free.getDate()}</span>`;}
-  $("#pl-sub").innerHTML=[S.team.name,S.team.season].filter(Boolean).map(esc).join(" · ")+(rest?" "+rest:"");
+  $("#pl-sub").innerHTML=[S.team.name,S.team.season].filter(Boolean).map(esc).join(" · ")+(rest?" "+rest:"")+posLine(p);
   const tbl=(cols,row)=>`<div class="tbl-wrap"><table><thead><tr>${cols.map(([,l])=>`<th style="cursor:default">${l}</th>`).join("")}</tr></thead><tbody><tr>${cols.map(([k,,f])=>`<td>${f?f(row[k],row):row[k]}</td>`).join("")}</tr></tbody></table></div>`;
   let html="";
   html+=B?`<div><h3 style="margin-bottom:6px">Batting</h3>${tbl([["g","G"],["pa","PA"],...BAT,["avg","AVG",fmt3],["obp","OBP",fmt3],["slg","SLG",fmt3],["ops","OPS",fmt3]],B)}</div>`:`<p class="note">No at-bats yet.</p>`;
@@ -895,7 +914,7 @@ async function playerContext(pid){
     sb.from("ai_reports").select("output,created_at").eq("player_id",pid).eq("kind","player").order("created_at",{ascending:false}).limit(1)]);
   return {
     ...teamContext(),today:today(),
-    player:{first_name:p.name,jersey:p.num},
+    player:{first_name:p.name,jersey:p.num,primary_positions:posSort(posP(p)),backup_positions:posSort(posB(p))},
     batting_team_games:pickNums(aggBat(team),BK),batting_all_games:pickNums(aggBat(all),BK),
     pitching_all_games:pickNums(aggPit(all),PK),fielding_all_games:pickNums(aggFld(all),["g","po","a","e","pct"]),
     pitching_status_today:availOn(pid,today()),
@@ -1551,6 +1570,7 @@ function route(){
   if(!TEAM)v="teams";
   else{
     if(!canEdit&&["scorebook","sheet"].includes(v))v="signin";
+    if(v==="roster"&&!role){v="signin";const n=$("#si-state");if(n&&!session)n.textContent="Sign in to see the roster. It's only for families and staff on the team.";}
     if(v==="admin"&&!isAdmin)v=session?"schedule":"signin";
     if(v==="account"&&!session)v="signin";
     if(v==="signin"&&session&&role)v="schedule";
@@ -1580,7 +1600,7 @@ document.addEventListener("click",e=>{
   if(t.dataset.box){location.hash="#stats";$("#stat-game").value=t.dataset.box;renderStats();}
   else if(t.dataset.edit)openGameForm(findItem(t.dataset.edit));
   else if(t.dataset.enter){pendingEnter=t.dataset.enter;if(location.hash==="#scorebook")route();else location.hash="#scorebook";}
-  else if(t.dataset.pedit){const p=S.players.find(p=>p.id===t.dataset.pedit);editingPlayer=p.id;$("#player-form").hidden=false;$("#pf-name").value=p.name;$("#pf-num").value=p.num;$("#pf-delete").hidden=false;}
+  else if(t.dataset.pedit){const p=S.players.find(p=>p.id===t.dataset.pedit);editingPlayer=p.id;$("#player-form").hidden=false;$("#pf-name").value=p.name;$("#pf-num").value=p.num;$("#pf-delete").hidden=false;setPosForm(p);}
   else if(t.dataset.st){statType=t.dataset.st;$$("[data-st]").forEach(b=>b.setAttribute("aria-pressed",b===t));renderStats();}
   else if(t.dataset.k){const k=t.dataset.k;if(sortKey[statType]===k)sortDir[statType]*=-1;else{sortKey[statType]=k;sortDir[statType]=(statType==="pit"&&["era","whip","h","r","er","bb"].includes(k))?1:-1;}renderStats();}
 });
@@ -1632,11 +1652,15 @@ document.addEventListener("click",async e=>{if(e.target.id!=="import-add")return
   if(await run($("#import-status"),`Added ${add.length} schedule item${add.length>1?"s":""}`,()=>q(sb.from("games").insert(add.map(g=>({...gameRow(g),kind:g.kind}))))))
     {add.forEach(putItem);render();$("#import-preview").innerHTML="";$("#import-text").value="";}
 });
-$("#add-player").onclick=()=>{editingPlayer=null;$("#player-form").hidden=false;$("#pf-name").value="";$("#pf-num").value="";$("#pf-delete").hidden=true;$("#pf-name").focus();};
+$("#add-player").onclick=()=>{editingPlayer=null;$("#player-form").hidden=false;$("#pf-name").value="";$("#pf-num").value="";$("#pf-delete").hidden=true;setPosForm(null);$("#pf-name").focus();};
 $("#pf-cancel").onclick=()=>{$("#player-form").hidden=true};
 $("#pf-save").onclick=async()=>{const n=$("#pf-name").value.trim(),num=+$("#pf-num").value;if(!n)return;
-  const p=editingPlayer?{...S.players.find(x=>x.id===editingPlayer),name:n,num}:{id:uuid(),name:n,num,active:true};
-  if(await run($("#ts-status"),`Saved player ${n}`,()=>q(sb.from("players").upsert({id:p.id,team_id:TEAM.id,name:p.name,num:p.num,active:p.active!==false})))){
+  const pri=POS.filter(x=>pfPos[x]==="pri"),bak=POS.filter(x=>pfPos[x]==="bak");
+  const p=editingPlayer?{...S.players.find(x=>x.id===editingPlayer),name:n,num,pos_primary:pri,pos_backup:bak}:{id:uuid(),name:n,num,active:true,pos_primary:pri,pos_backup:bak};
+  const row={id:p.id,team_id:TEAM.id,name:p.name,num:p.num,active:p.active!==false,pos_primary:pri,pos_backup:bak};
+  if(await run($("#ts-status"),`Saved player ${n}`,async()=>{try{return await q(sb.from("players").upsert(row));}
+      catch(e){if(!/pos_primary|pos_backup|column/i.test(e.message||""))throw e;delete row.pos_primary;delete row.pos_backup;await q(sb.from("players").upsert(row));
+        throw new Error("Saved the name and number. To save positions, run supabase/012_roster_positions.sql in Supabase first.");}})){
     const i=S.players.findIndex(x=>x.id===p.id);if(i>=0)S.players[i]=p;else S.players.push(p);render();$("#player-form").hidden=true;}
 };
 $("#pf-delete").onclick=async()=>{ // keep stats history: mark inactive instead of deleting
@@ -1885,12 +1909,20 @@ function inplaySheet(){
    <button type="button" class="hit" data-ip="3b">Triple</button><button type="button" class="hit" data-ip="hr">Home run</button><button type="button" data-ip="e">Error</button>
    <button type="button" data-ip="fc">Fielder's choice</button><button type="button" data-sh="close" style="grid-column:span 2">Cancel</button></div>`);
 }
+// First guess at the defense from the lineup: primaries first, then backups, then whoever is left.
+function autoDefense(lu){
+  const ps=lu.map(id=>S.players.find(p=>p.id===id)).filter(Boolean),used=new Set(),map={};
+  for(const pass of [posP,posB])for(const x of POS){if(map[x])continue;const p=ps.find(p=>!used.has(p.id)&&pass(p).includes(x));if(p){map[x]=p.id;used.add(p.id);}}
+  for(const x of POS){if(map[x])continue;const p=ps.find(p=>!used.has(p.id));if(p){map[x]=p.id;used.add(p.id);}}
+  return map;
+}
 function posSheet(){
-  const st=lvState,lu=st.lu.length?st.lu:sortedPlayers().map(p=>p.id),cur={...st.pos};if(!cur.P)POS.forEach((p,i)=>{if(lu[i])cur[p]=lu[i];});
+  const st=lvState,lu=st.lu.length?st.lu:sortedPlayers().map(p=>p.id),cur={...st.pos};if(!cur.P)Object.assign(cur,autoDefense(lu));
   sheetState={type:"pos"};
-  const opts=id=>`<option value="">—</option>`+sortedPlayers().map(p=>`<option value="${p.id}" ${p.id===id?"selected":""}>#${p.num} ${esc(p.name)}</option>`).join("");
+  const opts=(id,x)=>{const rank=p=>posP(p).includes(x)?0:posB(p).includes(x)?1:2;const ps=sortedPlayers().slice().sort((a,b)=>rank(a)-rank(b));
+    return `<option value="">—</option>`+ps.map(p=>`<option value="${p.id}" ${p.id===id?"selected":""}>#${p.num} ${esc(p.name)}${rank(p)===0?" (primary)":rank(p)===1?" (backup)":""}</option>`).join("");};
   openSheet(`<h2 id="lv-sheet-title">Positions</h2><p class="note">Change the pitcher here too. Pitches and outs count for whoever is on the mound.</p>
-   <div class="posgrid">${POS.map(p=>`<label class="f">${p} (${POSNUM[p]})<select id="pos-${p}">${opts(cur[p])}</select></label>`).join("")}</div>
+   <div class="posgrid">${POS.map(p=>`<label class="f">${p} (${POSNUM[p]})<select id="pos-${p}">${opts(cur[p],p)}</select></label>`).join("")}</div>
    <span class="status" id="pos-status"></span>
    <div class="row"><button class="primary big" type="button" data-sh="pos-save" style="flex:1">Save positions</button><button type="button" data-sh="close">Cancel</button></div>`);
 }

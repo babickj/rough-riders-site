@@ -27,7 +27,7 @@
   <a href="#schedule" data-v="schedule">Schedule</a>
   <a href="#live" data-v="live">Live</a>
   <a href="#stats" data-v="stats">Stats</a>
-  <a href="#roster" data-v="roster">Roster</a>
+  <a href="#roster" data-v="roster" class="member-only">Roster</a>
   <a href="#photos" data-v="photos">Photos</a>
   <a href="#tryouts" data-v="tryouts" id="nav-tryouts" hidden>Tryouts</a>
   <a href="#scorebook" data-v="scorebook" class="edit-only">Enter game</a>
@@ -115,12 +115,20 @@
       <div class="row">
         <label class="f">First name<input type="text" id="pf-name"></label>
         <label class="f">Jersey #<input type="number" id="pf-num" style="width:80px" min="0" max="99"></label>
-        <button class="primary" type="button" id="pf-save">Save player</button><button type="button" id="pf-cancel">Cancel</button><button type="button" id="pf-delete" hidden>Remove</button>
       </div>
+      <div>
+        <div class="f" style="font-weight:600">Positions <span class="note">Tap once for primary, twice for backup, again to clear. Pick as many as fit.</span></div>
+        <div class="poschips" id="pf-pos" role="group" aria-label="Positions"></div>
+      </div>
+      <div class="row"><button class="primary" type="button" id="pf-save">Save player</button><button type="button" id="pf-cancel">Cancel</button><button type="button" id="pf-delete" hidden>Remove</button></div>
     </div>
+    <details class="panel edit-only" id="depth-box"><summary>Depth chart</summary>
+      <p class="note">Who plays where, from each player's primary and backup positions. Red means a position has no one listed.</p>
+      <div class="tbl-wrap"><table id="depth"></table></div>
+    </details>
     <div class="panel coach-only" id="reveal-panel">
       <h3>Roster posting</h3>
-      <p class="note">Keep the roster hidden from the public while you work on it, and post it at a set time. Coaches and scorekeepers always see it. Visitors see a countdown until then.</p>
+      <p class="note">The roster is only for signed-in team members. Keep it hidden from parents while you work on it, and post it at a set time. Coaches and scorekeepers always see it. Everyone else sees a countdown until then.</p>
       <div class="row">
         <label class="f">Post roster at<input type="datetime-local" id="rv-at"></label>
         <button type="button" class="primary" id="rv-save">Schedule posting</button>

@@ -358,3 +358,16 @@ nav.tabs .wrap.more-l:not(.more-r){-webkit-mask-image:linear-gradient(90deg,tran
   .kpis b{font-size:22px}
   .kpis span{font-size:11px}
 }
+
+/* ---- positions ---- */
+.posline{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.pos{font-family:var(--f-head);font-weight:700;font-size:12px;letter-spacing:.04em;padding:1px 6px;border-radius:2px;line-height:1.4}
+.pos.pri{background:var(--red);color:#fff}
+.pos.bak{border:1px solid var(--muted);color:var(--muted)}
+.poschips{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:6px;margin-top:6px;max-width:520px}
+.poschips button{font-family:var(--f-head);font-weight:800;font-size:18px;padding:8px 4px 6px;border:1.5px solid var(--line);background:var(--surface);color:var(--fg);display:flex;flex-direction:column;align-items:center;gap:2px;min-height:52px}
+.poschips button small{font-family:var(--f-body);font-weight:600;font-size:11px;letter-spacing:0}
+.poschips button.pri{background:var(--red);border-color:var(--red);color:#fff}
+.poschips button.bak{border-color:var(--fg);border-style:dashed}
+#depth td.gap{color:var(--bad);font-weight:600}
+#pl-sub .posline{margin-top:6px}
