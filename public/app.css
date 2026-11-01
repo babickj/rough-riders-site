@@ -274,3 +274,21 @@ body:not(.is-coach) .coach-only{display:none!important}
 .frames img{width:100%;display:block;border:1px solid var(--line)}
 .gd-list{margin:0;padding-left:22px;display:flex;flex-direction:column;gap:4px}
 .flag{color:var(--bad);font-weight:600}
+
+/* ---- write-ups ---- */
+.wu-banner{background:var(--soft);border-left:4px solid var(--warn);padding:8px 12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
+.wu-banner.ok{border-left-color:var(--good)}
+.st{font-family:var(--f-head);text-transform:uppercase;letter-spacing:.06em;font-weight:700;font-size:11px;padding:1px 6px;border-radius:2px;margin-right:6px;vertical-align:1px}
+.st.new{background:color-mix(in srgb,var(--red) 16%,transparent);color:var(--red-ink)}
+.st.improving{background:color-mix(in srgb,var(--good) 16%,transparent);color:var(--good)}
+.st.still{background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn)}
+.st.resolved,.st.improved{background:color-mix(in srgb,var(--good) 16%,transparent);color:var(--good)}
+.st.steady{background:var(--soft);color:var(--muted)}
+.st.worse{background:color-mix(in srgb,var(--bad) 14%,transparent);color:var(--bad)}
+.evid{font-size:12px;color:var(--muted)}
+.cmts{display:flex;flex-direction:column;gap:4px;border-left:2px solid var(--line);padding-left:10px}
+.cmts div{font-size:13px}
+.wu-edit{display:flex;flex-direction:column;gap:8px}
+.wu-edit textarea{min-height:70px}
+.wu-edit fieldset{border:1px solid var(--line);padding:8px;display:flex;flex-direction:column;gap:6px}
+.ai-card .row button{font-size:13px;padding:5px 10px}

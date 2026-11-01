@@ -75,6 +75,12 @@
     <div class="tbl-wrap"><table id="stat-table"></table></div>
     <div class="tbl-wrap" id="team-games-wrap" hidden><table id="team-games"></table></div>
     <p class="note" id="stat-note"></p>
+    <div class="panel coach-only">
+      <div class="sec-head" style="margin:0"><h3>Team review</h3><button type="button" class="primary" id="tr-run">Run team review</button></div>
+      <p class="note">Reads every player's latest write-up and the team totals, then suggests what to work on as a team and a 90-minute practice plan.</p>
+      <span class="status" id="tr-status"></span>
+      <div id="tr-out"></div>
+    </div>
     <div class="coach-only">
       <div class="sec-head" style="margin-bottom:8px"><h3>Pitcher availability today</h3></div>
       <div class="avail" id="avail"></div>
@@ -207,6 +213,7 @@
         <label class="f">Caption (optional)<input type="text" id="ph-cap" maxlength="140"></label>
       </div>
       <div><div class="f-label">Who's in it? <span class="note">Tap everyone who appears, or Team.</span></div><div class="chips" id="ph-tags"></div></div>
+      <div class="row"><label class="row" style="gap:6px"><input type="checkbox" id="ph-ai" checked style="width:18px;height:18px;accent-color:var(--red)"> Review with AI after upload</label><label class="f">Look at<select id="ph-ai-focus"><option>Hitting</option><option>Pitching</option><option>Fielding</option><option>Baserunning</option><option>General</option></select></label></div>
       <div class="row"><button class="primary" type="button" id="ph-upload">Upload</button><span class="note">Video clips up to 50 MB, like a swing or a play. For full games, use a YouTube link below.</span></div>
       <details>
         <summary>Add a YouTube link instead</summary>
@@ -235,10 +242,13 @@
     <div class="player-head"><div class="jersey big" id="pl-num"></div><div><h2 id="pl-name"></h2><div class="note" id="pl-sub"></div></div></div>
     <label class="row coach-only" style="gap:8px"><input type="checkbox" id="pl-aiok" style="width:18px;height:18px;accent-color:var(--red)"> Family has OK'd AI review of this player's photos and video</label>
     <div class="panel coach-only" id="ai-panel">
-      <div class="sec-head" style="margin:0"><h3>AI coaching report</h3><button class="primary" type="button" id="ai-run">Write a new report</button></div>
-      <p class="note">Reads this player's stats, trends, measurements, and coach notes, and suggests strengths, things to work on, and drills. Clip reviews from the Photos section below also land here.</p>
+      <div class="sec-head" style="margin:0"><h3>Development write-up</h3><span class="row"><button class="primary" type="button" id="wu-refresh">Update now</button><button type="button" id="wu-deep">Season review</button></span></div>
+      <p class="note" id="wu-state"></p>
       <span class="status" id="ai-status"></span>
-      <div id="ai-reports"></div>
+      <div id="wu-current"></div>
+      <div id="wu-deepdive"></div>
+      <details id="wu-history"><summary>Past versions</summary><div id="wu-past"></div></details>
+      <details id="wu-clips"><summary>Clip and photo reviews</summary><div id="wu-cliplist"></div></details>
     </div>
     <label class="row" style="gap:8px;font-weight:600" id="pl-scope"><input type="checkbox" id="pl-outside" checked style="width:18px;height:18px;accent-color:var(--red)"> Include games outside the team</label>
     <div id="pl-stats" class="stack" style="gap:18px"></div>

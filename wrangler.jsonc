@@ -12,7 +12,7 @@
   "keep_vars": true,
   // Cloudflare Workers AI: free daily allowance, used when no ANTHROPIC_API_KEY is set.
   "ai": { "binding": "AI" },
-  // Spond schedule sync every 2 hours (times are UTC).
-  "triggers": { "crons": ["17 */2 * * *"] },
+  // Spond schedule sync every 2 hours; nightly write-up refresh at 10:23 (times are UTC).
+  "triggers": { "crons": ["17 */2 * * *", "23 10 * * *"] },
   "observability": { "enabled": true }
 }

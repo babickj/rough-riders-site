@@ -76,6 +76,16 @@ the `ai` binding in `wrangler.jsonc`, no key needed). To use Claude instead, add
 - Enter game > lineup > **Suggest with AI**: batting order and pitching plan that respects rest days and the pitch limit.
 Reports are saved per player and visible to coaches and admins only.
 
+### 9. Living write-ups
+Run `supabase/008_living_writeups.sql` once.
+- Each player has one development write-up with every version kept. New versions arrive as drafts; a coach marks
+  them reviewed, edits them, or comments. Coach edits and comments are treated as fact by the next version.
+- Focus areas keep an id across versions with a status (new, improving, still working, resolved) and cite clip reviews.
+- Database triggers stamp `players.data_changed_at` when stats, outside games, notes, measurements, tagged media or clip
+  reviews change. A nightly job (10:23 UTC) drafts updates for up to 20 players with new data. **Update now** does it on demand.
+- **Season review** looks back over every version; **Team review** (Stats tab) reads all write-ups and suggests a practice plan.
+- Uploads can be AI-reviewed automatically (only for players whose family OK box is checked).
+
 ### Later: your own web address
 In the Worker, **Settings > Domains & Routes > Add > Custom domain**. For one address per team, add each one and map it in `config.js`:
 ```js

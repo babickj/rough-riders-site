@@ -398,10 +398,10 @@ function tileHtml(m,urls){
   const cap=[m.caption,gname(m.game_id)].filter(Boolean).join(" · ");
   const tags=!isCoach?"":[m.team_tag?`<span>Team</span>`:"",...(m.players||[]).map(id=>{const p=S.players.find(x=>x.id===id);return p?`<a href="#player-${p.id}">#${p.num} ${esc(p.name)}</a>`:""})].join("")||(canEdit_?`<span>Not tagged</span>`:"");
   const foot=`<div class="cap"><span>${esc(cap)}</span><span>${edit}${del}</span></div>${tags?`<div class="tags">${tags}</div>`:""}`;
-  if(m.kind==="video"&&m.url){const id=ytId(m.url);return id?`<div class="tile video"><div class="vid"><iframe src="https://www.youtube-nocookie.com/embed/${id}" title="${esc(m.caption||"Team video")}" loading="lazy" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen></iframe></div>${foot}</div>`:"";}
+  if(m.kind==="video"&&m.url){const id=ytId(m.url);return id?`<div class="tile video" id="tile-${m.id}"><div class="vid"><iframe src="https://www.youtube-nocookie.com/embed/${id}" title="${esc(m.caption||"Team video")}" loading="lazy" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen></iframe></div>${foot}</div>`:"";}
   const u=urls[m.path];if(!u)return "";
-  if(m.kind==="video")return `<div class="tile video"><video src="${u}" controls preload="metadata" playsinline></video>${foot}</div>`;
-  return `<div class="tile"><img src="${u}" alt="${esc(m.caption||"Team photo")}" loading="lazy" data-full="${u}">${foot}</div>`;
+  if(m.kind==="video")return `<div class="tile video" id="tile-${m.id}"><video src="${u}" controls preload="metadata" playsinline></video>${foot}</div>`;
+  return `<div class="tile" id="tile-${m.id}"><img src="${u}" alt="${esc(m.caption||"Team photo")}" loading="lazy" data-full="${u}">${foot}</div>`;
 }
 async function renderMedia(el,filter){
   el.innerHTML=`<p class="note">Loading…</p>`;
@@ -433,7 +433,7 @@ $("#ph-upload").onclick=async()=>{
   if(!upTags.size){setStatus(st,"Tap who's in it, or Team, so it shows up on the right player pages.","err");return;}
   const big=files.find(f=>f.type.startsWith("video/")&&f.size>50*1024*1024);
   if(big){setStatus(st,`${big.name} is over 50 MB. Trim it to the play, record at 720p, or use a YouTube link.`,"err");return;}
-  $("#ph-upload").disabled=true;let ok=0;
+  $("#ph-upload").disabled=true;let ok=0;const added=[];
   try{
     for(const f of files){
       setStatus(st,`Uploading ${ok+1} of ${files.length}…`);
@@ -442,10 +442,11 @@ $("#ph-upload").onclick=async()=>{
       const ext=isVid?((f.name.match(/\.(mp4|mov|webm|m4v)$/i)||[,"mp4"])[1].toLowerCase()):"jpg";
       const path=`${TEAM.id}/${uuid()}.${ext}`,mime=isVid?(f.type||"video/mp4"):"image/jpeg";
       const up=await sb.storage.from("media").upload(path,blob,{contentType:mime});if(up.error)throw up.error;
-      await q(sb.from("media").insert({team_id:TEAM.id,kind:isVid?"video":"photo",path,mime,caption:$("#ph-cap").value.trim(),game_id:$("#ph-game").value||null,...tagFields(upTags)}));
-      ok++;
+      const row=await q(sb.from("media").insert({team_id:TEAM.id,kind:isVid?"video":"photo",path,mime,caption:$("#ph-cap").value.trim(),game_id:$("#ph-game").value||null,...tagFields(upTags)}).select());
+      added.push(row[0]);ok++;
     }
     setStatus(st,`Added ${ok}.`,"ok");$("#ph-files").value="";$("#ph-cap").value="";upTags=new Set();$("#ph-tags").innerHTML=chipsHtml(upTags);renderMedia($("#gallery"),$("#ph-filter").value);
+    if($("#ph-ai").checked&&aiEnabled)autoReview(added,$("#ph-ai-focus").value,st);
   }catch(e){setStatus(st,(ok?`Added ${ok}, then stopped: `:"")+(/players|team_tag|mime/.test(e.message||"")?"Photo tags aren't set up yet. Run supabase/005_players_media.sql in Supabase.":errText(e)),"err");}
   finally{$("#ph-upload").disabled=false;}
 };
@@ -572,7 +573,7 @@ function renderPlayer(pid){
     return `<tr class="${r.kind}"><td class="l">${fmtDay(r.date)} ${esc(r.label)}</td><td>${r.res}</td><td>${bs}</td><td>${ps}</td><td>${fs}</td>${canDel?`<td>${r.kind==="outside"?`<button class="linkbtn" data-ogdel="${r.id}">Delete</button>`:""}</td>`:""}</tr>`;}).join("")+`</tbody>`:`<tbody><tr><td class="l note">No games yet.</td></tr></tbody>`;
   if(!isCoach)return;
   renderMedia($("#pl-gallery"),pid);renderMetrics(pid);renderNotes(pid);prepAddForms();
-  $("#pl-aiok").checked=!!p.ai_ok;renderReports(pid);
+  $("#pl-aiok").checked=!!p.ai_ok;renderWriteup(pid);
 }
 $("#pl-outside").addEventListener("change",()=>renderPlayer(curPlayer));
 
@@ -833,53 +834,148 @@ async function playerContext(pid){
 const COACH_RULES=`Rules: Base every point on the data or images provided and cite numbers where you can. Say plainly when there is too little data to judge. This is a young athlete, so be specific, encouraging, and constructive. Never comment on body shape, weight, or appearance, and make no medical or injury claims. Respect the team's pitch-count limits and rest rules; never suggest exceeding them. Drills must be safe, age-appropriate, and doable at a normal practice.`;
 async function saveReport(row){return (await q(sb.from("ai_reports").insert({team_id:TEAM.id,by_name:me.name||me.email,...row}).select()))[0];}
 const li=a=>(a||[]).filter(Boolean);
-function reportHtml(r){
-  const o=r.output||{},when=new Date(r.created_at).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"});
-  const kind={player:"Report",clip:"Clip review",gameday:"Game plan"}[r.kind]||"AI";
-  const focus=li(o.focus).length?`<h5>Work on</h5><ul>${li(o.focus).map(f=>`<li><b>${esc(f.title)}</b>. ${esc(f.why||"")}${f.drill?`<br><span class="note">Drill: ${esc(f.drill)}</span>`:""}</li>`).join("")}</ul>`:"";
+const dateStr=t=>t?new Date(t).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"}):"";
+const pill=s=>`<span class="st ${esc(s)}">${esc({new:"New",improving:"Improving",still:"Still working",resolved:"Resolved",improved:"Improved",steady:"Steady",worse:"Slipping"}[s]||s)}</span>`;
+function commentsHtml(r){const c=r.comments||[];return c.length?`<div class="cmts">${c.map(x=>`<div><b>${esc(x.by||"Coach")}</b> <span class="note">${esc(dateStr(x.at))}</span>: ${esc(x.text)}</div>`).join("")}</div>`:"";}
+function basisLine(b){if(!b)return "";const parts=[[b.team_games,"team game"],[b.outside_games,"outside game"],[b.clip_reviews,"clip review"],[b.notes,"coach note"],[b.measurements,"measurement"]].filter(([n])=>n).map(([n,l])=>`${n} ${l}${n>1?"s":""}`);return parts.length?`Based on ${parts.join(", ")}${b.data_through?`, through ${fmtDay(b.data_through)}`:""}.`:"";}
+function reportHtml(r,actions=""){
+  const o=r.output||{},when=dateStr(r.created_at);
+  const kind={player:"Write-up",clip:"Clip review",gameday:"Game plan",deepdive:"Season review",team:"Team review"}[r.kind]||"AI";
+  const who=r.source==="nightly"?"Nightly update":r.source==="upload"?"After upload":esc(r.by_name||"Coach");
+  const status=r.kind==="player"?(r.status==="reviewed"?`<span>Reviewed by ${esc(r.reviewed_by_name||"a coach")} ${esc(dateStr(r.reviewed_at))}</span>`:`<span class="flag">Draft, not reviewed</span>`)+(r.edited?"<span>Edited by a coach</span>":""):"";
+  const meta=`<div class="meta"><span class="ai-kind">${kind}</span><span>${who}</span><span>${esc(when)}</span>${status}</div>`;
   let body="";
   if(r.kind==="clip"){
-    body=`<div class="sum">${esc(o.what_it_shows||"")}${o.focus_area?` <span class="note">(${esc(o.focus_area)})</span>`:""}</div>
+    const focus=li(o.focus).length?`<h5>Work on</h5><ul>${li(o.focus).map(f=>`<li><b>${esc(f.title)}</b>. ${esc(f.why||"")}${f.drill?`<br><span class="note">Drill: ${esc(f.drill)}</span>`:""}</li>`).join("")}</ul>`:"";
+    body=`<div class="sum">${esc(o.what_it_shows||"")}${o.focus_area?` <span class="note">(${esc(o.focus_area)})</span>`:""}${r.media_id?` <button class="linkbtn" data-goclip="${r.media_id}">See it</button>`:""}</div>
       ${li(o.positives).length?`<h5>Doing well</h5><ul>${li(o.positives).map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}
       ${li(o.observations).length?`<h5>What the frames show</h5><ul>${li(o.observations).map(x=>`<li>Frame ${esc(x.frame)}: ${esc(x.note)}</li>`).join("")}</ul>`:""}
       ${focus}<div class="note">Confidence: ${esc(o.confidence||"unknown")}${o.caveats?`. ${esc(o.caveats)}`:""}</div>`;
+  }else if(r.kind==="deepdive"){
+    body=`<div class="sum">${esc(o.headline||"")}</div>
+      ${li(o.progress).length?`<h5>Focus areas over time</h5><ul>${li(o.progress).map(x=>`<li>${pill(x.trajectory)}<b>${esc(x.title)}</b>. ${esc(x.detail||"")}</li>`).join("")}</ul>`:""}
+      ${li(o.what_worked).length?`<h5>What worked</h5><ul>${li(o.what_worked).map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}
+      ${li(o.not_moving).length?`<h5>Not moving yet</h5><ul>${li(o.not_moving).map(x=>`<li><b>${esc(x.title)}</b>. Try instead: ${esc(x.try_instead||"")}</li>`).join("")}</ul>`:""}
+      ${li(o.next_month).length?`<h5>Next month</h5><ul>${li(o.next_month).map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}
+      ${o.data_note?`<div class="note">${esc(o.data_note)}</div>`:""}`;
+  }else if(r.kind==="team"){
+    body=`<div class="sum">${esc(o.headline||"")}</div>
+      ${li(o.strengths).length?`<h5>Team strengths</h5><ul>${li(o.strengths).map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}
+      ${li(o.weaknesses).length?`<h5>Work on as a team</h5><ul>${li(o.weaknesses).map(x=>`<li><b>${esc(x.title)}</b>. ${esc(x.why||"")}${x.drill?`<br><span class="note">Drill: ${esc(x.drill)}</span>`:""}</li>`).join("")}</ul>`:""}
+      ${li(o.practice_plan).length?`<h5>Practice plan</h5><ul>${li(o.practice_plan).map(x=>`<li><b>${esc(x.block)}</b>${x.minutes?` (${esc(x.minutes)} min)`:""}: ${esc(x.what||"")}</li>`).join("")}</ul>`:""}
+      ${li(o.spotlights).length?`<h5>Player spotlights</h5><ul>${li(o.spotlights).map(x=>`<li><b>${esc(x.first_name)}</b>: ${esc(x.note||"")}</li>`).join("")}</ul>`:""}
+      ${o.data_note?`<div class="note">${esc(o.data_note)}</div>`:""}`;
   }else{
+    const ev=f=>li(f.evidence).length?`<div class="evid">Evidence: ${li(f.evidence).map(e=>`${esc(e.note||"")}${e.date?` (${esc(fmtDay(e.date))})`:""}${e.clip_id?` <button class="linkbtn" data-goclip="${e.clip_id}">see clip</button>`:""}`).join("; ")}</div>`:"";
     body=`<div class="sum">${esc(o.summary||"")}</div>
       ${li(o.strengths).length?`<h5>Strengths</h5><ul>${li(o.strengths).map(s=>`<li><b>${esc(s.title)}</b>. ${esc(s.detail||"")}</li>`).join("")}</ul>`:""}
-      ${focus}
+      ${li(o.focus).length?`<h5>Work on</h5><ul>${li(o.focus).map(f=>`<li>${f.status?pill(f.status):""}<b>${esc(f.title)}</b>. ${esc(f.why||"")}${f.drill?`<br><span class="note">Drill: ${esc(f.drill)}</span>`:""}${ev(f)}</li>`).join("")}</ul>`:""}
+      ${li(o.resolved).length?`<h5>Resolved</h5><ul>${li(o.resolved).map(x=>`<li>${pill("resolved")}<b>${esc(x.title)}</b>${x.note?`. ${esc(x.note)}`:""}</li>`).join("")}</ul>`:""}
       ${li(o.watch).length?`<h5>Keep an eye on</h5><ul>${li(o.watch).map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}
-      ${o.changes?`<h5>Since last report</h5><div>${esc(o.changes)}</div>`:""}
-      ${o.data_note?`<div class="note">${esc(o.data_note)}</div>`:""}`;
+      ${o.changes?`<h5>Since last version</h5><div>${esc(o.changes)}</div>`:""}
+      <div class="note">${esc([o.data_note,basisLine(r.basis)].filter(Boolean).join(" "))}</div>`;
   }
-  return `<div class="ai-card"><div class="meta"><span class="ai-kind">${kind}</span><span>${esc(r.by_name||"Coach")}</span><span>${esc(when)}</span><button class="linkbtn" data-aidel="${r.id}">Delete</button></div>${body}</div>`;
+  return `<div class="ai-card" data-rid="${r.id}">${meta}${body}${commentsHtml(r)}${actions}</div>`;
 }
-async function renderReports(pid){
-  const box=$("#ai-reports");
-  const {data,error}=await sb.from("ai_reports").select("*").eq("player_id",pid).order("created_at",{ascending:false}).limit(20);
-  if(error){box.innerHTML=`<p class="note">${esc(notSetUp(error))}</p>`;return;}
-  box.innerHTML=data.map(reportHtml).join("")||`<p class="note">No AI reports yet.</p>`;
+const wuById={};
+function wuActions(r,kind){
+  const b=[];
+  if(kind==="draft")b.push(`<button class="primary" data-wu="review" data-id="${r.id}">Mark reviewed</button>`);
+  if(kind!=="past")b.push(`<button data-wu="edit" data-id="${r.id}">Edit</button>`);
+  b.push(`<button data-wu="comment" data-id="${r.id}">Comment</button>`);
+  if(r.status==="draft")b.push(`<button data-wu="discard" data-id="${r.id}">Discard</button>`);
+  return `<div class="row">${b.join("")}</div><div class="wu-cbox" hidden><textarea maxlength="1000" placeholder="Add a correction or context. The AI treats coach comments as fact next time."></textarea><div class="row"><button class="primary" data-wu="addc" data-id="${r.id}">Add comment</button><button data-wu="cancelc">Cancel</button></div></div>`;
 }
-let pendingAiDel=null;
+async function renderWriteup(pid){
+  const cur=$("#wu-current"),state=$("#wu-state");
+  const [{data,error},pl]=await Promise.all([
+    sb.from("ai_reports").select("*").eq("player_id",pid).in("kind",["player","clip","deepdive"]).neq("status","discarded").order("created_at",{ascending:false}).limit(80),
+    sb.from("players").select("data_changed_at,ai_ok").eq("id",pid)]);
+  if(error){cur.innerHTML=`<p class="note">${esc(/status|comments|basis|source/.test(error.message||"")?"Write-ups need one more database step. Run supabase/008_living_writeups.sql in Supabase.":notSetUp(error))}</p>`;return;}
+  if(curPlayer!==pid)return;
+  data.forEach(r=>wuById[r.id]=r);
+  const versions=data.filter(r=>r.kind==="player"),clips=data.filter(r=>r.kind==="clip"),dd=data.find(r=>r.kind==="deepdive");
+  const reviewed=versions.find(v=>v.status==="reviewed"),latest=versions[0];
+  const draft=latest&&latest.status==="draft"&&(!reviewed||latest.created_at>reviewed.created_at)?latest:null;
+  const changed=pl.data&&pl.data[0]&&pl.data[0].data_changed_at;
+  const stale=changed&&(!latest||new Date(changed)>new Date(latest.created_at));
+  state.textContent=!versions.length?"No write-up yet. Press Update now to make the first one. After that it updates overnight whenever this player gets new stats, notes, measurements, or clips.":
+    stale?`New data since the last version (${ago(changed)}). It will update overnight, or press Update now.`:"Up to date. It updates overnight when new data comes in.";
+  let html="";
+  if(draft)html+=`<div class="wu-banner"><span><b>New draft</b> from ${esc(dateStr(draft.created_at))} needs a coach's review. Mark it reviewed, edit it, or add a comment to correct it.</span></div>${reportHtml(draft,wuActions(draft,"draft"))}`;
+  if(reviewed)html+=draft?`<details><summary>Current reviewed write-up (${esc(dateStr(reviewed.created_at))})</summary>${reportHtml(reviewed,wuActions(reviewed,"current"))}</details>`:reportHtml(reviewed,wuActions(reviewed,"current"));
+  cur.innerHTML=html;
+  const shown=new Set([draft&&draft.id,reviewed&&reviewed.id]);
+  const past=versions.filter(v=>!shown.has(v.id));
+  $("#wu-history").hidden=!past.length;$("#wu-history summary").textContent=`Past versions (${past.length})`;
+  $("#wu-past").innerHTML=past.map(v=>reportHtml(v,wuActions(v,"past"))).join("");
+  $("#wu-clips").hidden=!clips.length;$("#wu-clips summary").textContent=`Clip and photo reviews (${clips.length})`;
+  $("#wu-cliplist").innerHTML=clips.map(c=>reportHtml(c,wuActions(c,"past"))).join("");
+  $("#wu-deepdive").innerHTML=dd?`<details${draft?"":" open"}><summary>Season review from ${esc(dateStr(dd.created_at))}</summary>${reportHtml(dd)}</details>`:"";
+  $("#wu-deep").disabled=!versions.length;
+  $("#wu-refresh").textContent=versions.length?"Update now":"Write the first one";
+}
+function editForm(r){
+  const o=r.output||{};
+  return `<form class="wu-edit" data-eid="${r.id}">
+    <label class="f">Summary<textarea name="summary">${esc(o.summary||"")}</textarea></label>
+    <label class="f">Strengths (one per line, "Title: detail")<textarea name="strengths">${esc(li(o.strengths).map(s=>`${s.title}: ${s.detail||""}`).join("\n"))}</textarea></label>
+    ${li(o.focus).map((f,i)=>`<fieldset><legend class="f-label">Work on ${i+1}</legend>
+      <div class="row"><label class="f" style="flex:1">Title<input name="f${i}title" value="${esc(f.title)}"></label><label class="f">Status<select name="f${i}status">${["new","improving","still","resolved"].map(s=>`<option value="${s}" ${f.status===s?"selected":""}>${{new:"New",improving:"Improving",still:"Still working",resolved:"Resolved"}[s]}</option>`).join("")}</select></label></div>
+      <label class="f">Why<textarea name="f${i}why">${esc(f.why||"")}</textarea></label>
+      <label class="f">Drill<input name="f${i}drill" value="${esc(f.drill||"")}"></label></fieldset>`).join("")}
+    <label class="f">Keep an eye on (one per line)<textarea name="watch">${esc(li(o.watch).join("\n"))}</textarea></label>
+    <div class="row"><button class="primary" type="submit">Save changes</button><button type="button" data-wu="canceledit">Cancel</button></div>
+  </form>`;
+}
+const wuStatus=t=>setStatus($("#ai-status"),t.text||t,t.kind||"");
 document.addEventListener("click",async e=>{
-  const d=e.target.closest("[data-aidel]");if(!d)return;
-  if(pendingAiDel!==d.dataset.aidel){pendingAiDel=d.dataset.aidel;d.textContent="Tap again to delete";return;}
-  pendingAiDel=null;try{await q(sb.from("ai_reports").delete().eq("id",d.dataset.aidel));d.closest(".ai-card").remove();}catch(err){}
-});
-$("#ai-run").onclick=async()=>{
-  const st=$("#ai-status"),btn=$("#ai-run");if(!aiEnabled){setStatus(st,AI_OFF,"err");return;}
-  btn.disabled=true;setStatus(st,"Writing the report. This usually takes 20–40 seconds.");
+  const b=e.target.closest("[data-wu],[data-goclip]");if(!b)return;
+  if(b.dataset.goclip){e.preventDefault();const t=document.getElementById("tile-"+b.dataset.goclip);
+    if(t){t.scrollIntoView({behavior:"smooth",block:"center"});t.style.outline="3px solid var(--red)";setTimeout(()=>t.style.outline="",2500);}
+    else{const m=(await sb.from("media").select("*").eq("id",b.dataset.goclip)).data;if(m&&m[0]){mediaById[m[0].id]=m[0];const urls=await signedUrls(m);const box=document.createElement("div");box.className="gallery";box.innerHTML=tileHtml(m[0],urls);b.closest(".ai-card").appendChild(box);}}
+    return;}
+  const a=b.dataset.wu,r=wuById[b.dataset.id],card=b.closest(".ai-card");
   try{
-    const ctx=await playerContext(curPlayer);
-    const out=await ai(`You are an experienced youth baseball coach and player-development specialist helping a volunteer coaching staff. Below is everything the staff has recorded for one player. Write a short development report for the coaches.
-${COACH_RULES}
-Return ONLY JSON with this shape: {"summary":"2-3 sentences","strengths":[{"title":"","detail":""}],"focus":[{"title":"","why":"","drill":""}],"watch":[""],"changes":"what changed since the previous report, or null","data_note":"one sentence on how much data this is based on"}. At most 3 strengths, 3 focus items, and 3 watch items.
-
-DATA:
-${JSON.stringify(ctx)}`);
-    if(!out||!out.summary)throw new Error("The AI's answer was incomplete. Try again.");
-    await saveReport({kind:"player",player_id:curPlayer,output:out});
-    setStatus(st,"");renderReports(curPlayer);logAct(`AI report for ${(S.players.find(x=>x.id===curPlayer)||{}).name}`);
-  }catch(e){setStatus(st,notSetUp(e),"err");}
+    if(a==="review"){await q(sb.from("ai_reports").update({status:"reviewed",reviewed_by_name:me.name||me.email,reviewed_at:new Date().toISOString()}).eq("id",r.id));logAct(`Reviewed a write-up`);renderWriteup(curPlayer);}
+    else if(a==="discard"){if(b.dataset.armed!=="1"){b.dataset.armed="1";b.textContent="Tap again to discard";return;}await q(sb.from("ai_reports").update({status:"discarded"}).eq("id",r.id));renderWriteup(curPlayer);}
+    else if(a==="comment"){const box=card.querySelector(".wu-cbox");box.hidden=false;box.querySelector("textarea").focus();}
+    else if(a==="cancelc"){card.querySelector(".wu-cbox").hidden=true;}
+    else if(a==="addc"){const t=card.querySelector(".wu-cbox textarea").value.trim();if(!t)return;
+      const comments=[...(r.comments||[]),{by:me.name||me.email,at:new Date().toISOString(),text:t}];
+      await q(sb.from("ai_reports").update({comments}).eq("id",r.id));r.comments=comments;renderWriteup(curPlayer);}
+    else if(a==="edit"){card.outerHTML=editForm(r);}
+    else if(a==="canceledit"){renderWriteup(curPlayer);}
+  }catch(err){wuStatus({text:notSetUp(err),kind:"err"});}
+});
+document.addEventListener("submit",async e=>{
+  const f=e.target.closest(".wu-edit");if(!f)return;e.preventDefault();
+  const r=wuById[f.dataset.eid],o=r.output||{},v=n=>(f.elements[n]?f.elements[n].value:"").trim();
+  const lines=s=>s.split("\n").map(x=>x.trim()).filter(Boolean);
+  const focus=[],resolved=[...li(o.resolved)];
+  li(o.focus).forEach((x,i)=>{const it={...x,title:v(`f${i}title`),status:v(`f${i}status`),why:v(`f${i}why`),drill:v(`f${i}drill`)};if(!it.title)return;if(it.status==="resolved")resolved.push({id:it.id,title:it.title,note:"Marked resolved by a coach."});else focus.push(it);});
+  const out={...o,summary:v("summary"),strengths:lines(v("strengths")).map(l=>{const k=l.indexOf(":");return k>0?{title:l.slice(0,k).trim(),detail:l.slice(k+1).trim()}:{title:l,detail:""};}),focus,resolved,watch:lines(v("watch"))};
+  try{await q(sb.from("ai_reports").update({output:out,edited:true,ai_output:r.ai_output||r.output}).eq("id",r.id));logAct("Edited a write-up");renderWriteup(curPlayer);}
+  catch(err){wuStatus({text:notSetUp(err),kind:"err"});}
+});
+async function wuRun(action,btn){
+  const st=$("#ai-status");if(!aiEnabled){setStatus(st,AI_OFF,"err");return;}
+  btn.disabled=true;setStatus(st,action==="refresh"?"Writing the update. This usually takes 20–60 seconds.":"Looking back over every version. This usually takes 30–60 seconds.");
+  try{await api("/api/report",{action,team_id:TEAM.id,player_id:curPlayer});setStatus(st,action==="refresh"?"New draft ready below. Review it when you can.":"Season review ready below.","ok");renderWriteup(curPlayer);}
+  catch(e){setStatus(st,e.message,"err");}
+  finally{btn.disabled=false;}
+}
+$("#wu-refresh").onclick=e=>wuRun("refresh",e.currentTarget);
+$("#wu-deep").onclick=e=>wuRun("deep_dive",e.currentTarget);
+async function loadTeamReview(){
+  const {data,error}=await sb.from("ai_reports").select("*").eq("team_id",TEAM.id).eq("kind","team").order("created_at",{ascending:false}).limit(1);
+  $("#tr-out").innerHTML=error?"":data[0]?reportHtml(data[0]):`<p class="note">No team review yet.</p>`;
+}
+$("#tr-run").onclick=async()=>{
+  const st=$("#tr-status"),btn=$("#tr-run");if(!aiEnabled){setStatus(st,AI_OFF,"err");return;}
+  btn.disabled=true;setStatus(st,"Reading every player's write-up. This usually takes 30–60 seconds.");
+  try{const r=await api("/api/report",{action:"team",team_id:TEAM.id});setStatus(st,"");$("#tr-out").innerHTML=reportHtml(r.report);logAct("Ran a team review");}
+  catch(e){setStatus(st,e.message,"err");}
   finally{btn.disabled=false;}
 };
 $("#pl-aiok").addEventListener("change",async e=>{
@@ -927,37 +1023,57 @@ async function contactSheet(frames,cols=3,cellW=420){
     x.fillStyle="rgba(0,0,0,.75)";x.fillRect(cx,cy,44,34);x.fillStyle="#fff";x.font="bold 24px sans-serif";x.fillText(String(i+1),cx+(i+1>9?6:14),cy+26);});
   const b=await new Promise(r=>c.toBlob(r,"image/jpeg",.85));return blobToB64(b);
 }
-async function runAiReview(){
-  const st=$("#air-status"),m=aiMedia,pid=$("#air-player").value,focus=$("#air-focus").value,p=S.players.find(x=>x.id===pid);
-  if(!aiEnabled){setStatus(st,AI_OFF,"err");return;}
-  aiBusy=true;aiSheet.querySelectorAll("button").forEach(b=>b.disabled=true);
-  try{
-    setStatus(st,m.kind==="video"?"Pulling frames from the clip…":"Loading the photo…");
-    const blob=await mediaBlob(m);
-    const frames=m.kind==="video"?await videoFrames(blob,aiMulti?10:6):await (async()=>{const b=await resizeImage(blob,1280,.85);return [{t:null,b64:await blobToB64(b),url:URL.createObjectURL(b)}];})();
-    setStatus(st,"Reviewing. This usually takes 20–60 seconds.");
-    const ctx=await playerContext(pid);
-    const brief={...teamContext(),player:ctx.player,batting:ctx.batting_all_games,pitching:ctx.pitching_all_games,recent_games:ctx.game_log.slice(-5),
-      coach_notes_on_topic:ctx.coach_notes.filter(n=>n.topic===focus.toLowerCase()||n.topic==="general").slice(0,6),caption:m.caption||""};
-    const sheet=m.kind==="video"&&!aiMulti;
-    const imgs=sheet?[{data:await contactSheet(frames),media_type:"image/jpeg",label:`This one image is a contact sheet of ${frames.length} frames from the video, in time order, numbered 1 to ${frames.length} left to right, top to bottom.`}]
-      :frames.map((f,i)=>({data:f.b64,media_type:"image/jpeg",label:m.kind==="video"?`Frame ${i+1} (${f.t.toFixed(1)}s)`:"Frame 1"}));
-    const out=await aiImages(`You are an experienced youth baseball coach reviewing ${m.kind==="video"?`${frames.length} still frames taken in order from a short video`:"a photo"} of one player, #${p.num} ${p.name}. Focus area: ${focus}. Other people may appear; comment only on this player.
+async function reviewMedia(m,pid,focus,say){
+  const p=S.players.find(x=>x.id===pid);
+  say(m.kind==="video"?`Pulling frames from the clip for ${p.name}…`:`Loading the photo for ${p.name}…`);
+  const blob=await mediaBlob(m);
+  const frames=m.kind==="video"?await videoFrames(blob,aiMulti?10:6):await (async()=>{const b=await resizeImage(blob,1280,.85);return [{t:null,b64:await blobToB64(b),url:URL.createObjectURL(b)}];})();
+  say(`Reviewing ${p.name}. This usually takes 20–60 seconds.`);
+  const ctx=await playerContext(pid);
+  const brief={...teamContext(),player:ctx.player,batting:ctx.batting_all_games,pitching:ctx.pitching_all_games,recent_games:ctx.game_log.slice(-5),
+    coach_notes_on_topic:ctx.coach_notes.filter(n=>n.topic===focus.toLowerCase()||n.topic==="general").slice(0,6),caption:m.caption||""};
+  const sheet=m.kind==="video"&&!aiMulti;
+  const imgs=sheet?[{data:await contactSheet(frames),media_type:"image/jpeg",label:`This one image is a contact sheet of ${frames.length} frames from the video, in time order, numbered 1 to ${frames.length} left to right, top to bottom.`}]
+    :frames.map((f,i)=>({data:f.b64,media_type:"image/jpeg",label:m.kind==="video"?`Frame ${i+1} (${f.t.toFixed(1)}s)`:"Frame 1"}));
+  const out=await aiImages(`You are an experienced youth baseball coach reviewing ${m.kind==="video"?`${frames.length} still frames taken in order from a short video`:"a photo"} of one player, #${p.num} ${p.name}. Focus area: ${focus}. Other people may appear; comment only on this player.
 Only describe what is actually visible. If the images don't show the motion clearly (camera angle, blur, player too small, a different activity), say so and set confidence to low.
 ${COACH_RULES}
 Return ONLY JSON with this shape: {"what_it_shows":"one sentence","positives":[""],"observations":[{"frame":1,"note":""}],"focus":[{"title":"","why":"","drill":""}],"confidence":"low|medium|high","caveats":"one sentence"}. At most 3 positives, 6 observations, and 2 focus items.${m.kind==="video"?"":" Use frame 1 for the photo."}
 
 PLAYER CONTEXT:
 ${JSON.stringify(brief)}`,imgs);
-    if(!out||!out.what_it_shows)throw new Error("The AI's answer was incomplete. Try again.");
-    out.focus_area=focus;
-    const saved=await saveReport({kind:"clip",player_id:pid,media_id:m.id,output:out});
-    setStatus(st,`Saved to ${p.name}'s AI reports.`,"ok");
+  if(!out||!out.what_it_shows)throw new Error("The AI's answer was incomplete. Try again.");
+  out.focus_area=focus;
+  const saved=await saveReport({kind:"clip",player_id:pid,media_id:m.id,output:out,status:"reviewed"});
+  logAct(`AI clip review for ${p.name}`);
+  return {saved,frames};
+}
+async function runAiReview(){
+  const st=$("#air-status"),m=aiMedia,pid=$("#air-player").value,focus=$("#air-focus").value,p=S.players.find(x=>x.id===pid);
+  if(!aiEnabled){setStatus(st,AI_OFF,"err");return;}
+  aiBusy=true;aiSheet.querySelectorAll("button").forEach(b=>b.disabled=true);
+  try{
+    const {saved,frames}=await reviewMedia(m,pid,focus,t=>setStatus(st,t));
+    setStatus(st,`Saved to ${p.name}'s write-up. It'll be used the next time the write-up updates.`,"ok");
     $("#air-result").innerHTML=`${frames.length>1?`<div class="frames">${frames.map((f,i)=>`<figure><img src="${f.url}" alt="Frame ${i+1}"><figcaption>Frame ${i+1}</figcaption></figure>`).join("")}</div>`:""}${reportHtml(saved)}`;
-    logAct(`AI clip review for ${p.name}`);
-    if(curView==="player"&&curPlayer===pid)renderReports(pid);
+    if(curView==="player"&&curPlayer===pid)renderWriteup(pid);
   }catch(e){setStatus(st,notSetUp(e),"err");}
   finally{aiBusy=false;aiSheet.querySelectorAll("button").forEach(b=>b.disabled=false);}
+}
+async function autoReview(rows,focus,st){
+  let done=0,skipped=[];
+  for(const m of rows){
+    if(!m||!m.path||!(m.players||[]).length)continue;
+    const tagged=m.players.map(id=>S.players.find(p=>p.id===id)).filter(Boolean);
+    const missing=tagged.filter(p=>!p.ai_ok);
+    if(missing.length){skipped.push(...missing.map(p=>p.name));continue;}
+    for(const p of tagged.slice(0,3)){
+      try{await reviewMedia(m,p.id,focus,t=>setStatus(st,t));done++;}
+      catch(e){setStatus(st,`AI review stopped: ${notSetUp(e)}`,"err");return;}
+    }
+  }
+  const sk=[...new Set(skipped)];
+  setStatus(st,`${done?`AI reviewed ${done} upload${done>1?"s":""}; the results feed each player's write-up.`:"Upload done."}${sk.length?` Skipped AI for ${sk.join(", ")} (family OK not checked on their page).`:""}`,done||!sk.length?"ok":"");
 }
 aiSheet.addEventListener("click",e=>{const b=e.target.closest("[data-air]");if(!b)return;if(b.dataset.air==="close"){if(!aiBusy)aiSheet.hidden=true;}else runAiReview();});
 document.addEventListener("click",e=>{const b=e.target.closest("[data-mai]");if(!b)return;const m=mediaById[b.dataset.mai];if(m)openAiReview(m);});
@@ -1027,6 +1143,7 @@ function route(){
   if(!TEAM)return;
   if(v==="admin"){renderAdmin();renderSpondAdmin();loadRequests();}
   if(v==="photos")renderPhotos();
+  if(v==="stats"&&isCoach)loadTeamReview();
   if(v==="live")startLive();
   if(v==="scorebook"){renderEntryGames(pendingEnter);if(pendingData){fillEntry(pendingData);setStatus($("#eg-status"),"Box score built from live scoring. Check it, then press Save game.","ok");}}
   pendingEnter=null;pendingData=null;

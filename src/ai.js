@@ -103,16 +103,29 @@ export async function onRequestPost({ request, env }) {
   if (p === "cloudflare" && images.length > 1) return json({ error: "The free AI model looks at one image at a time." }, 400);
   const prompt = String(body.prompt || "").slice(0, p === "claude" ? 60000 : 40000);
 
+  try {
+    return json({ data: await runAI(env, prompt, images), provider: p });
+  } catch (e) {
+    return json({ error: e.message }, e.status || 502);
+  }
+}
+
+// Shared by the write-up code: ask the configured model and return parsed JSON, or throw a friendly error.
+export async function runAI(env, prompt, images = []) {
+  const p = provider(env);
+  if (!p) throw Object.assign(new Error("AI is turned off for this site."), { status: 501 });
   const ask = p === "claude" ? askClaude : askCloudflare;
   try {
     // One retry if the answer isn't clean JSON (smaller models sometimes add extra text).
     let data = parseJson(await ask(env, prompt, images));
     if (!data) data = parseJson(await ask(env, prompt + "\n\nReturn only the JSON object.", images));
-    if (!data) return json({ error: "The AI's answer wasn't readable. Try again." }, 502);
-    return json({ data, provider: p });
+    if (!data) throw Object.assign(new Error("The AI's answer wasn't readable. Try again."), { status: 502 });
+    return data;
   } catch (e) {
+    if (e.status) throw e;
     const msg = String(e && e.message || e);
-    if (/daily|quota|neuron|limit/i.test(msg)) return json({ error: "Today's free AI allowance is used up. It resets at 4 or 5 PM Pacific." }, 429);
-    return json({ error: "The AI couldn't finish that. Try again in a minute." }, 502);
+    if (/daily|quota|neuron|limit|4006/i.test(msg)) throw Object.assign(new Error("Today's free AI allowance is used up. It resets at 4 or 5 PM Pacific."), { status: 429 });
+    throw Object.assign(new Error("The AI couldn't finish that. Try again in a minute."), { status: 502 });
   }
 }
+export { provider };
