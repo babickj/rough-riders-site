@@ -211,13 +211,16 @@ function eventRowHtml(g){
   <div class="gmain"><div class="gopp">${esc(g.opp)}</div><div class="gmeta">${[g.loc,g.time].filter(Boolean).map(esc).join(" · ")}</div></div>
   <div class="gres"><span class="pill ev">Event</span><small>${canEdit?`<button class="linkbtn" data-edit="${g.id}">Edit</button>`:""}</small></div></div>`;
 }
+// "Today", "Tomorrow", "In 5 days", "In 3 wks": the time is already on the row.
+function relDay(d){const n=Math.round((new Date(d+"T12:00")-new Date(today()+"T12:00"))/864e5);return n<=0?"Today":n===1?"Tomorrow":n<14?`In ${n} days`:`In ${Math.round(n/7)} wks`;}
 function gameRowHtml(g){
   if(isEvent(g))return eventRowHtml(g);
   const p=dParts(g.date); let res="";
   if(g.status==="final"&&g.us!=null){const k=g.us>g.them?"w":g.us<g.them?"l":"t";res=`<span class="pill ${k}">${k.toUpperCase()}</span>${g.us}–${g.them}`;}
   else if(g.status==="cancelled")res=`<span class="pill l">Cancelled</span>`;
   else if(g.status==="postponed")res=`<span class="pill t">Postponed</span>`;
-  else res=`<span class="pill up">${esc(g.time)}</span>`;
+  else if(g.date<today())res=`<span class="pill up">No score yet</span>`;
+  else res=`<span class="pill up${g.date===today()?" today":""}">${relDay(g.date)}</span>`;
   const actions=[isCoach&&S.lines[g.id]?`<button class="linkbtn" data-box="${g.id}">Box score</button>`:"",canEdit?`<button class="linkbtn" data-edit="${g.id}">Edit</button>`:"",canEdit?`<button class="linkbtn" data-enter="${g.id}">Enter stats</button>`:""].filter(Boolean).join(" · ");
   return `<div class="game"><div class="gdate"><div class="m">${dow(g.date)} ${p.m}</div><div class="d">${p.d}</div></div>
   <div class="gmain"><div class="gopp">${g.home?"vs":"at"} ${esc(g.opp)}</div><div class="gmeta">${esc(g.loc)}${g.status==="final"?"":" · "+esc(g.time)}</div></div>
@@ -229,14 +232,20 @@ function renderSchedule(){
   $("#upcoming").innerHTML=up.map(gameRowHtml).join("")||`<p class="note" style="padding:12px 0">${TEAM.announcement?esc(TEAM.announcement):"Nothing scheduled yet."}${canEdit?" Add a game or event, or paste a schedule.":""}</p>`;
   $("#results").innerHTML=done.map(gameRowHtml).join("")||`<p class="note" style="padding:12px 0">No games played yet.</p>`;
   $("#open-import").hidden=!aiEnabled;
-  const sp=!!TEAM.spond_group;
-  $("#sp-sync").hidden=!sp;
-  const line=$("#sp-line");line.hidden=!sp;
-  if(sp)line.textContent=`Games sync from Spond${TEAM.spond_group_name?" ("+TEAM.spond_group_name+")":""}. ${TEAM.spond_synced_at?"Last synced "+ago(TEAM.spond_synced_at)+".":"Not synced yet."}`;
+  const src=syncSources();
+  $("#sp-sync").hidden=!src.length;
+  const line=$("#sp-line");line.hidden=!src.length;
+  if(src.length)line.textContent=src.map(s=>`Games sync from ${s.name}. ${s.at?"Last synced "+ago(s.at)+".":"Not synced yet."}`).join(" ");
+}
+function syncSources(){
+  const out=[];
+  if(TEAM.spond_group)out.push({kind:"spond",name:"Spond"+(TEAM.spond_group_name?" ("+TEAM.spond_group_name+")":""),at:TEAM.spond_synced_at});
+  if(TEAM.ics_source)out.push({kind:"ics",name:TEAM.ics_source,at:TEAM.ics_synced_at});
+  return out;
 }
 function ago(ts){const m=Math.round((Date.now()-new Date(ts))/6e4);if(m<1)return "just now";if(m<60)return m+" min ago";const h=Math.round(m/60);if(h<24)return h+" hr ago";return new Date(ts).toLocaleDateString(undefined,{month:"short",day:"numeric"});}
 async function reloadTeam(){const t=await q(sb.from("teams").select("*").eq("id",TEAM.id));if(t[0])Object.assign(TEAM,t[0]);await loadTeamData();render();}
-function syncSummary(r){const parts=[];if(r.added)parts.push(`${r.added} new`);if(r.updated)parts.push(`${r.updated} updated`);if(r.removed)parts.push(`${r.removed} cancelled game${r.removed>1?"s":""} removed`);return parts.length?`Synced: ${parts.join(", ")}.`:"Synced. No games found in Spond yet.";}
+function syncSummary(r,from="Spond"){const parts=[];if(r.added)parts.push(`${r.added} new`);if(r.updated)parts.push(`${r.updated} updated`);if(r.cancelled)parts.push(`${r.cancelled} cancelled or postponed`);if(r.removed)parts.push(`${r.removed} removed`);return parts.length?`Synced from ${from}: ${parts.join(", ")}.`:`Synced. No upcoming games found in ${from} yet.`;}
 let editingGame=null;
 function setFormKind(k){const ev=k==="event";$("#gf-kind").value=k;$("#gf-opp-label").textContent=ev?"What":"Opponent";$("#gf-opp").placeholder=ev?"Tryouts":"";$("#gf-home-wrap").hidden=ev;$("#gf-st-wrap").hidden=ev;
   $("#game-form-title").textContent=(editingGame?"Edit ":"Add ")+(ev?"event":"game");}
@@ -269,11 +278,14 @@ function renderTeamStats(){
     <td>${rate(n(tot.b_h),n(tot.b_ab))}</td><td>${rate(n(tot.b_h)+n(tot.b_bb)+n(tot.b_hbp),pa)}</td><td>${rate(tb,n(tot.b_ab))}</td><td>${r.ra}</td><td>${ip?fmt2(n(tot.p_er)*inn()/ip):"—"}</td><td>${n(tot.p_so)}</td><td>${n(tot.f_e)}</td></tr></tbody>`:"";
   $("#team-games-wrap").hidden=!games.length;
   $("#team-games").innerHTML=games.length?`<thead><tr><th class="l" style="cursor:default">Game</th>${["Result","AB","H","2B","3B","HR","BB","K","SB","AVG"].map(x=>`<th style="cursor:default">${x}</th>`).join("")}</tr></thead><tbody>${games.slice().reverse().map(g=>{const b=T[g.id].bat;return `<tr><td class="l">${dParts(g.date).m} ${dParts(g.date).d} ${g.home?"vs":"at"} ${esc(g.opp)}</td><td>${g.us!=null?`${g.us>g.them?"W":g.us<g.them?"L":"T"} ${g.us}–${g.them}`:""}</td><td>${n(b.ab)}</td><td>${n(b.h)}</td><td>${n(b.d)}</td><td>${n(b.t)}</td><td>${n(b.hr)}</td><td>${n(b.bb)}</td><td>${n(b.so)}</td><td>${n(b.sb)}</td><td>${rate(n(b.h),n(b.ab))}</td></tr>`}).join("")}</tbody>`:"";
+  const k=$("#stat-kpis");k.hidden=!games.length;
+  const ng=S.games.filter(g=>g.status==="final"&&g.us!=null).length||games.length;
+  k.innerHTML=games.length?[["Record",`${r.w}–${r.l}${r.t?"–"+r.t:""}`],["Team AVG",rate(n(tot.b_h),n(tot.b_ab))],["OBP",rate(n(tot.b_h)+n(tot.b_bb)+n(tot.b_hbp),pa)],["Runs / game",(r.rs/ng).toFixed(1)],["Allowed / game",(r.ra/ng).toFixed(1)],["Team ERA",ip?fmt2(n(tot.p_er)*inn()/ip):"—"]].map(([l,v])=>`<div><b>${v}</b><span>${l}</span></div>`).join(""):"";
   $("#stat-note").textContent=games.length?"Team totals. Player stats are shared with the coaching staff.":"No stats entered yet.";
 }
 function renderStats(){
   if(!isCoach){renderTeamStats();return;}
-  $("#team-games-wrap").hidden=true;
+  $("#team-games-wrap").hidden=true;$("#stat-kpis").hidden=true;
   const sel=$("#stat-game"),cur=sel.value;
   sel.innerHTML=`<option value="">Whole season</option>`+S.games.filter(g=>S.lines[g.id]).sort((a,b)=>b.date.localeCompare(a.date)).map(g=>`<option value="${g.id}">${dParts(g.date).m} ${dParts(g.date).d} ${g.home?"vs":"at"} ${esc(g.opp)}</option>`).join("");
   sel.value=cur;
@@ -758,9 +770,31 @@ $("#lg-up").onclick=async()=>{
 // ---------- spond ----------
 $("#sp-sync").onclick=async()=>{
   const b=$("#sp-sync"),line=$("#sp-line");b.disabled=true;b.textContent="Syncing…";
-  try{const r=await api("/api/spond",{action:"sync",team_id:TEAM.id});await reloadTeam();line.textContent=syncSummary(r.result)+" "+line.textContent;logAct("Synced schedule from Spond");}
-  catch(e){line.hidden=false;line.textContent=e.message;}
-  finally{b.disabled=false;b.textContent="Sync with Spond";}
+  const msgs=[];
+  for(const s of syncSources()){
+    try{const r=await api(s.kind==="spond"?"/api/spond":"/api/calsync",{action:"sync",team_id:TEAM.id});msgs.push(syncSummary(r.result,s.kind==="spond"?"Spond":TEAM.ics_source));logAct(`Synced schedule from ${s.kind==="spond"?"Spond":TEAM.ics_source}`);}
+    catch(e){msgs.push(`${s.name}: ${e.message}`);}
+  }
+  try{await reloadTeam();}catch(e){}
+  line.hidden=false;line.textContent=msgs.join(" ");b.disabled=false;b.textContent="Sync now";
+};
+// ---------- TeamSnap / calendar link ----------
+function renderIcsAdmin(){
+  $("#ic-state").textContent=TEAM.ics_source?`Connected to ${TEAM.ics_source}. ${TEAM.ics_synced_at?"Last synced "+ago(TEAM.ics_synced_at)+".":""} Paste a new link to replace it.`:"Not connected. Paste the team's calendar link from TeamSnap (or GameChanger, SportsEngine, Google Calendar) and press Connect and sync.";
+  $("#ic-off").hidden=!TEAM.ics_source;
+}
+$("#ic-save").onclick=async()=>{
+  const st=$("#ic-status"),url=$("#ic-url").value.trim();
+  if(!url){setStatus(st,"Paste the calendar link first.","err");return;}
+  setStatus(st,"Reading the calendar…");$("#ic-save").disabled=true;
+  try{const r=await api("/api/calsync",{action:"set",team_id:TEAM.id,url});$("#ic-url").value="";await reloadTeam();renderIcsAdmin();setStatus(st,syncSummary(r.result,r.source),"ok");logAct(`Connected ${r.source} calendar sync`);}
+  catch(e){setStatus(st,e.message,"err");}
+  finally{$("#ic-save").disabled=false;}
+};
+$("#ic-off").onclick=async()=>{
+  const st=$("#ic-status"),from=TEAM.ics_source;
+  try{await api("/api/calsync",{action:"set",team_id:TEAM.id,url:""});await reloadTeam();renderIcsAdmin();setStatus(st,`${from} sync is off. Games already synced stay on the schedule.`,"ok");logAct(`Turned off ${from} sync`);}
+  catch(e){setStatus(st,e.message,"err");}
 };
 function renderSpondAdmin(){
   $("#sp-admin-state").textContent=TEAM.spond_group?`Connected to Spond group "${TEAM.spond_group_name||TEAM.spond_group}". ${TEAM.spond_synced_at?"Last synced "+ago(TEAM.spond_synced_at)+".":""}`:"Not connected. Press Show my Spond groups, pick this team's group, and press Use this group.";
@@ -1504,6 +1538,9 @@ $("#cal-copy").onclick=async()=>{try{await navigator.clipboard.writeText($("#cal
 
 // ---------- routing ----------
 const VIEWS=["schedule","live","stats","roster","photos","scorebook","sheet","admin","signin","account","teams","player","tryouts"];
+// Show a fade at the edge of the tab bar when more tabs are off-screen.
+function navFade(){const w=$("nav.tabs .wrap");if(!w)return;w.classList.toggle("more-r",w.scrollLeft+w.clientWidth<w.scrollWidth-4);w.classList.toggle("more-l",w.scrollLeft>4);}
+$("nav.tabs .wrap").addEventListener("scroll",navFade,{passive:true});addEventListener("resize",navFade);
 function route(){
   let v=location.hash.slice(1);
   if(v.startsWith("player-")){curPlayer=v.slice(7);v="player";}
@@ -1519,10 +1556,11 @@ function route(){
   for(const x of VIEWS)$("#v-"+x).hidden=x!==v;
   const navV=v==="player"?"roster":v;curView=v;
   $$("nav.tabs a").forEach(a=>a.getAttribute("data-v")===navV?a.setAttribute("aria-current","page"):a.removeAttribute("aria-current"));
+  const cur=$("nav.tabs a[aria-current]");if(cur&&cur.scrollIntoView)cur.scrollIntoView({block:"nearest",inline:"nearest"});navFade();
   if(v!=="player"&&TEAM)document.title=`${S.team.name} Baseball`;
   if(v==="player"){renderPlayer(curPlayer);window.scrollTo(0,0);}
   if(!TEAM)return;
-  if(v==="admin"){renderAdmin();renderSpondAdmin();loadRequests();}
+  if(v==="admin"){renderAdmin();renderSpondAdmin();renderIcsAdmin();loadRequests();}
   if(v==="photos")renderPhotos();
   if(v==="stats"&&isCoach){loadTeamReview();if($("#pl-log-box").open)renderPitchLog();}
   if(v==="tryouts")renderTryouts();

@@ -40,9 +40,9 @@
   <div id="team-banner" class="team-banner" hidden></div>
   <section id="v-schedule" class="stack" hidden>
     <div class="sec-head"><h2>Schedule</h2>
-      <span class="row edit-only"><button type="button" id="add-game">Add game</button><button type="button" id="add-event">Add event</button><button type="button" id="sp-sync" hidden>Sync with Spond</button><button type="button" id="open-import">Paste a schedule</button></span></div>
+      <span class="row edit-only"><button type="button" id="add-game">Add game</button><button type="button" id="add-event">Add event</button><button type="button" id="sp-sync" hidden>Sync now</button><button type="button" id="open-import">Paste a schedule</button></span></div>
     <p class="note" id="sp-line" hidden></p>
-    <details class="panel" id="cal-box"><summary>Add this schedule to your phone's calendar</summary>
+    <details class="panel" id="cal-box"><summary>Add to my calendar</summary>
       <p class="note">Subscribe once and new games, time changes, rainouts, and events show up in your calendar on their own (phones check every few hours).</p>
       <div class="row"><a class="btn primary" id="cal-sub" href="#">Subscribe on this phone</a><button type="button" id="cal-copy">Copy calendar link</button><span class="status" id="cal-status"></span></div>
       <p class="note"><b>iPhone:</b> tap Subscribe, then Subscribe again. <b>Google Calendar:</b> on a computer, open Google Calendar, then Other calendars, the + button, From URL, and paste the copied link.</p>
@@ -82,6 +82,7 @@
     <div class="sec-head"><h2>Season stats</h2>
       <div class="seg coach-only" role="group" aria-label="Stat type"><button type="button" data-st="bat" aria-pressed="true">Batting</button><button type="button" data-st="pit" aria-pressed="false">Pitching</button><button type="button" data-st="fld" aria-pressed="false">Fielding</button></div></div>
     <div class="row coach-only"><label class="f">Game<select id="stat-game"><option value="">Whole season</option></select></label></div>
+    <div class="kpis" id="stat-kpis" hidden></div>
     <div class="tbl-wrap"><table id="stat-table"></table></div>
     <div class="tbl-wrap" id="team-games-wrap" hidden><table id="team-games"></table></div>
     <p class="note" id="stat-note"></p>
@@ -454,7 +455,19 @@
       <p class="note" id="sp-admin-state"></p>
       <div class="row"><button type="button" id="sp-load">Show my Spond groups</button><label class="f" id="sp-pick-wrap" hidden>Spond group<select id="sp-pick"></select></label><button type="button" class="primary" id="sp-save" hidden>Use this group</button><button type="button" id="sp-off" hidden>Stop syncing</button></div>
       <span class="status" id="sp-astatus"></span>
-      <p class="note">Games come over from Spond every two hours, or when you press Sync with Spond on the Schedule tab. Practices and other non-game events are skipped. Name games in Spond like "vs Cardinals" or "@ Padres" so the opponent and home or away come through. Edits to a game's date, time, opponent, or field should be made in Spond, since the next sync copies Spond's version.</p>
+      <p class="note">Games come over from Spond every two hours, or when you press Sync now on the Schedule tab. Practices and other non-game events are skipped. Name games in Spond like "vs Cardinals" or "@ Padres" so the opponent and home or away come through. Edits to a game's date, time, opponent, or field should be made in Spond, since the next sync copies Spond's version.</p>
+    </div>
+    <div class="panel">
+      <h3>TeamSnap or other calendar sync</h3>
+      <p class="note" id="ic-state"></p>
+      <div class="row"><label class="f" style="flex:1;min-width:240px">Calendar link<input type="url" id="ic-url" placeholder="webcal://… or https://…ics" autocomplete="off"></label><button type="button" class="primary" id="ic-save">Connect and sync</button><button type="button" id="ic-off" hidden>Stop syncing</button></div>
+      <span class="status" id="ic-status"></span>
+      <details><summary>Where do I find the link?</summary>
+        <p class="note"><b>TeamSnap:</b> sign in on a computer (the phone app doesn't show the link), open the team, go to <b>Schedule</b>, then <b>Settings</b>, then <b>Sync Calendar / Export</b>, and copy the calendar link.</p>
+        <p class="note"><b>GameChanger, SportsEngine, TeamReach, LeagueApps:</b> look for "Sync to calendar", "Subscribe", or "iCal" on the team schedule and copy that link.</p>
+        <p class="note"><b>Google Calendar:</b> calendar Settings, Integrate calendar, copy the "Secret address in iCal format".</p>
+      </details>
+      <p class="note">Games come over every two hours, or when you press Sync now on the Schedule tab. Practices are skipped, cancelled games show as cancelled, and games deleted in the other app come off this schedule. Edit a game's date, time, or field in the other app, since the next sync copies its version. The link is kept private on the server.</p>
     </div>
     <div class="panel">
       <h3>Team logo</h3>
