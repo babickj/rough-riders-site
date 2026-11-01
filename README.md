@@ -56,6 +56,12 @@ Spond has no official public API; this uses the same calls as the open-source Sp
 3. The team lives at `/<web-name>` (e.g. `/eastlake`). Upload its logo in that team's Admin, set its season, and connect its Spond group if it has one.
 4. People, roles, photos, stats and access requests are separate per team. The site owner is admin on every team; other coaches can be added to every team at once with **Add to every team**.
 
+### 6. Player pages, coach notes, photo tags
+Run `supabase/005_players_media.sql` once. Player pages are at `/<team>#player-<id>` (tap a name on Roster or Stats).
+Coach notes are visible only to the team's admins. Photos and clips are tagged with players or Team when uploaded,
+and can be re-tagged with the Tag button. Clips up to 50 MB upload directly (the Supabase free plan's file limit);
+longer video goes on YouTube as a link.
+
 ### Later: your own web address
 In the Worker, **Settings > Domains & Routes > Add > Custom domain**. For one address per team, add each one and map it in `config.js`:
 ```js

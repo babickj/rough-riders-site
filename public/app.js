@@ -126,8 +126,9 @@ async function refreshRole(){
 }
 function renderAcct(){
   const a=$("#acct");
-  if(session)a.innerHTML=`<div>${esc(me.name||me.email)}</div>${role?`<span class="role">${role==="admin"?"Admin":role==="scorekeeper"?"Scorekeeper":"Parent"}</span>`:""}<div><a href="#account">My account</a>${myTeams.length>1?` · <a href="/?pick=1">Switch team</a>`:""} · <a href="#" data-signout>Sign out</a></div>`;
-  else a.innerHTML="";
+  const all=teams.length>1?`<a href="/">All teams</a>`:"";
+  if(session)a.innerHTML=`<div>${esc(me.name||me.email)}</div>${role?`<span class="role">${role==="admin"?"Admin":role==="scorekeeper"?"Scorekeeper":"Parent"}</span>`:""}<div><a href="#account">My account</a> · <a href="#" data-signout>Sign out</a>${all?" · "+all:""}</div>`;
+  else a.innerHTML=all?`<div>${all}</div>`:"";
   $("#rq-form").hidden=!!session;
   const st=$("#si-state");
   if(session&&!role)st.textContent=`You're signed in as ${me.email}, but this account isn't on the ${S.team.name} team yet. Ask the team admin to add you.`;
@@ -237,7 +238,7 @@ function renderStats(){
     const tot={};for(const [c] of BAT)tot[c]=rows.reduce((s,r)=>s+r.x[c],0);
     const ta=tot.ab?tot.h/tot.ab:NaN,tpa=tot.ab+tot.bb+tot.hbp,to=tpa?(tot.h+tot.bb+tot.hbp)/tpa:NaN,ts=tot.ab?(tot.h+tot.d+2*tot.t+3*tot.hr)/tot.ab:NaN;
     tbl.innerHTML=`<thead><tr><th class="l">#</th><th class="l">Player</th>${cols.map(([c,l])=>`<th data-k="${c}" ${k===c?`aria-sort="${dir<0?"descending":"ascending"}"`:""}>${l}</th>`).join("")}</tr></thead><tbody>`+
-      rows.map(({pid,x})=>{const p=pRow(pid);return `<tr><td class="num l">${p.num}</td><td class="l">${esc(p.name)}</td>${cols.map(([c])=>{const v=x[c];const L=lead[c]!==undefined&&v===lead[c]&&(!isRate(c)||qualified.some(q=>q.pid===pid));return `<td class="${L?"lead":""}">${isRate(c)?fmt3(v):v}</td>`}).join("")}</tr>`}).join("")+
+      rows.map(({pid,x})=>{const p=pRow(pid);return `<tr><td class="num l">${p.num}</td><td class="l">${p.id?plink(p):esc(p.name)}</td>${cols.map(([c])=>{const v=x[c];const L=lead[c]!==undefined&&v===lead[c]&&(!isRate(c)||qualified.some(q=>q.pid===pid));return `<td class="${L?"lead":""}">${isRate(c)?fmt3(v):v}</td>`}).join("")}</tr>`}).join("")+
       (rows.length?`<tr class="total"><td></td><td class="l">Team</td><td></td><td>${tpa}</td>${BAT.map(([c])=>`<td>${tot[c]}</td>`).join("")}<td>${fmt3(ta)}</td><td>${fmt3(to)}</td><td>${fmt3(ts)}</td><td>${fmt3(to+ts)}</td></tr>`:"")+`</tbody>`;
     $("#stat-note").textContent=rows.length?"Red marks the team leader. Rate leaders need at least one plate appearance per game played. Tap a column to sort.":"No stats entered yet.";
   }else if(statType==="fld"){
@@ -246,14 +247,14 @@ function renderStats(){
     const cols=[["g","G"],["po","PO"],["a","A"],["e","E"],["tc","TC"],["pct","FLD%"]],rows=Object.entries(t).map(([pid,x])=>({pid,x})),k=sortKey.fld,dir=sortDir.fld;
     rows.sort((a,b)=>((isNaN(a.x[k])?-1:a.x[k])-(isNaN(b.x[k])?-1:b.x[k]))*dir);
     tbl.innerHTML=`<thead><tr><th class="l">#</th><th class="l">Player</th>${cols.map(([c,l])=>`<th data-k="${c}" ${k===c?`aria-sort="${dir<0?"descending":"ascending"}"`:""}>${l}</th>`).join("")}</tr></thead><tbody>`+
-      rows.map(({pid,x})=>{const p=pRow(pid);return `<tr><td class="num l">${p.num}</td><td class="l">${esc(p.name)}</td>${cols.map(([c])=>`<td>${c==="pct"?fmt3(x[c]):x[c]}</td>`).join("")}</tr>`}).join("")+`</tbody>`;
+      rows.map(({pid,x})=>{const p=pRow(pid);return `<tr><td class="num l">${p.num}</td><td class="l">${p.id?plink(p):esc(p.name)}</td>${cols.map(([c])=>`<td>${c==="pct"?fmt3(x[c]):x[c]}</td>`).join("")}</tr>`}).join("")+`</tbody>`;
     $("#stat-note").textContent=rows.length?"PO is putouts, A is assists, E is errors, TC is total chances.":"No fielding entered yet. Live scoring records it automatically.";
   }else{
     const T=pitTotals(gid),cols=[["g","G"],["ip","IP"],["pc","Pitches"],["h","H"],["r","R"],["er","ER"],["bb","BB"],["so","K"],["era","ERA"],["whip","WHIP"],["k6","K/"+inn()]];
     const rows=Object.entries(T).map(([pid,x])=>({pid,x})),k=sortKey.pit,dir=sortDir.pit,val=(x,c)=>c==="ip"?x.outs:x[c];
     rows.sort((a,b)=>{const va=val(a.x,k),vb=val(b.x,k);return ((isNaN(va)?1e9*dir:va)-(isNaN(vb)?1e9*dir:vb))*dir});
     tbl.innerHTML=`<thead><tr><th class="l">#</th><th class="l">Pitcher</th>${cols.map(([c,l])=>`<th data-k="${c}" ${k===c?`aria-sort="${dir<0?"descending":"ascending"}"`:""}>${l}</th>`).join("")}</tr></thead><tbody>`+
-      rows.map(({pid,x})=>{const p=pRow(pid);return `<tr><td class="num l">${p.num}</td><td class="l">${esc(p.name)}</td>${cols.map(([c])=>`<td>${c==="ip"?outsToIp(x.outs):["era","whip","k6"].includes(c)?fmt2(x[c]):x[c]}</td>`).join("")}</tr>`}).join("")+`</tbody>`;
+      rows.map(({pid,x})=>{const p=pRow(pid);return `<tr><td class="num l">${p.num}</td><td class="l">${p.id?plink(p):esc(p.name)}</td>${cols.map(([c])=>`<td>${c==="ip"?outsToIp(x.outs):["era","whip","k6"].includes(c)?fmt2(x[c]):x[c]}</td>`).join("")}</tr>`}).join("")+`</tbody>`;
     $("#stat-note").textContent=rows.length?`ERA and strikeouts are scaled to a ${inn()}-inning game. Tap a column to sort.`:"No pitching entered yet.";
   }
   renderAvail();
@@ -265,7 +266,7 @@ function renderAvail(){
   for(const g of [...S.games].sort((a,b)=>a.date.localeCompare(b.date))){const L=S.lines[g.id];if(!L)continue;for(const [pid,p] of Object.entries(L.pit||{}))last[pid]={date:g.date,pc:+p.pc||0};}
   const t=new Date(today()+"T12:00");
   $("#avail").innerHTML=sortedPlayers().filter(p=>last[p.id]).map(p=>{const l=last[p.id],need=restDays(l.pc),d=new Date(l.date+"T12:00"),free=new Date(d);free.setDate(d.getDate()+need+1);const ok=t>=free;
-    return `<div class="av"><div><b>#${p.num} ${esc(p.name)}</b><div class="s">${l.pc} pitches on ${dParts(l.date).m} ${dParts(l.date).d}</div></div><span class="chip ${ok?"ok":"rest"}">${ok?"Available":"Rest until "+MON[free.getMonth()]+" "+free.getDate()}</span></div>`}).join("")||`<p class="note">No pitching outings yet.</p>`;
+    return `<div class="av"><div><b>#${p.num} ${plink(p)}</b><div class="s">${l.pc} pitches on ${dParts(l.date).m} ${dParts(l.date).d}</div></div><span class="chip ${ok?"ok":"rest"}">${ok?"Available":"Rest until "+MON[free.getMonth()]+" "+free.getDate()}</span></div>`}).join("")||`<p class="note">No pitching outings yet.</p>`;
 }
 
 // ---------- roster ----------
@@ -273,7 +274,7 @@ let editingPlayer=null;
 function renderRoster(){
   const T=batTotals(""),P=pitTotals("");
   $("#roster").innerHTML=sortedPlayers().map(p=>{const b=T[p.id],q=P[p.id];
-    return `<div class="card"><div class="jersey">${p.num}</div><div style="min-width:0;flex:1"><div class="nm">${esc(p.name)}</div><div class="ln">${b?`${fmt3(b.avg)} AVG · ${b.h} H · ${b.rbi} RBI`:"No at-bats yet"}</div>${q?`<div class="ln">${outsToIp(q.outs)} IP · ${fmt2(q.era)} ERA</div>`:""}${canEdit?`<button class="linkbtn" data-pedit="${p.id}">Edit</button>`:""}</div></div>`}).join("")||`<p class="note">No players yet.</p>`;
+    return `<div class="card"><div class="jersey">${p.num}</div><div style="min-width:0;flex:1"><div class="nm">${plink(p)}</div><div class="ln">${b?`${fmt3(b.avg)} AVG · ${b.h} H · ${b.rbi} RBI`:"No at-bats yet"}</div>${q?`<div class="ln">${outsToIp(q.outs)} IP · ${fmt2(q.era)} ERA</div>`:""}${canEdit?`<button class="linkbtn" data-pedit="${p.id}">Edit</button>`:""}</div></div>`}).join("")||`<p class="note">No players yet.</p>`;
   $("#ts-season").value=S.team.season||"";$("#ts-league").value=S.team.league||"";$("#ts-inn").value=inn();$("#ts-pmax").value=S.team.pitchMax||85;
   $("#ts-prest").value=fmtRest(restTiers());$("#ts-prules").value=presetFor(S.team.pitchMax,TEAM.pitch_rest&&TEAM.pitch_rest.length?TEAM.pitch_rest:null);
 }
@@ -348,56 +349,159 @@ function renderSheet(){
 // ---------- photos ----------
 let mediaRows=[];
 function ytId(u){const m=String(u).match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|shorts\/|embed\/|live\/))([A-Za-z0-9_-]{11})/);return m?m[1]:null;}
+// Media rows: kind photo|video, path (stored file) or url (YouTube), players[] tags, team_tag, game_id, caption.
+const gname=id=>{const g=S.games.find(x=>x.id===id);return g?`${dParts(g.date).m} ${dParts(g.date).d} ${g.home?"vs":"at"} ${g.opp}`:"";};
+let upTags=new Set();
+function chipsHtml(sel){
+  return `<button type="button" class="team" data-tag="team" aria-pressed="${sel.has("team")}">Team</button>`+sortedPlayers().map(p=>`<button type="button" data-tag="${p.id}" aria-pressed="${sel.has(p.id)}">#${p.num} ${esc(p.name)}</button>`).join("");
+}
+function chipToggle(e,sel,box){const b=e.target.closest("[data-tag]");if(!b)return;const t=b.dataset.tag;sel.has(t)?sel.delete(t):sel.add(t);b.setAttribute("aria-pressed",sel.has(t));}
+$("#ph-tags").addEventListener("click",e=>chipToggle(e,upTags));
+const tagFields=sel=>({players:[...sel].filter(t=>t!=="team"),team_tag:sel.has("team")});
+async function signedUrls(rows){
+  const paths=rows.filter(m=>m.path).map(m=>m.path),urls={};
+  for(let i=0;i<paths.length;i+=100){const {data}=await sb.storage.from("media").createSignedUrls(paths.slice(i,i+100),3600);(data||[]).forEach(d=>{if(d.signedUrl)urls[d.path]=d.signedUrl;});}
+  return urls;
+}
+function tileHtml(m,urls){
+  const canEdit_=m.created_by===me.id||canEdit, del=(m.created_by===me.id||isAdmin)?` · <button class="linkbtn" data-mdel="${m.id}">Delete</button>`:"";
+  const edit=canEdit_?`<button class="linkbtn" data-mtag="${m.id}">Tag</button>`:"";
+  const cap=[m.caption,gname(m.game_id)].filter(Boolean).join(" · ");
+  const tags=[m.team_tag?`<span>Team</span>`:"",...(m.players||[]).map(id=>{const p=S.players.find(x=>x.id===id);return p?`<a href="#player-${p.id}">#${p.num} ${esc(p.name)}</a>`:""})].join("")||(canEdit_?`<span>Not tagged</span>`:"");
+  const foot=`<div class="cap"><span>${esc(cap)}</span><span>${edit}${del}</span></div>${tags?`<div class="tags">${tags}</div>`:""}`;
+  if(m.kind==="video"&&m.url){const id=ytId(m.url);return id?`<div class="tile video"><div class="vid"><iframe src="https://www.youtube-nocookie.com/embed/${id}" title="${esc(m.caption||"Team video")}" loading="lazy" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen></iframe></div>${foot}</div>`:"";}
+  const u=urls[m.path];if(!u)return "";
+  if(m.kind==="video")return `<div class="tile video"><video src="${u}" controls preload="metadata" playsinline></video>${foot}</div>`;
+  return `<div class="tile"><img src="${u}" alt="${esc(m.caption||"Team photo")}" loading="lazy" data-full="${u}">${foot}</div>`;
+}
+async function renderMedia(el,filter){
+  el.innerHTML=`<p class="note">Loading…</p>`;
+  try{
+    let qy=sb.from("media").select("*").eq("team_id",TEAM.id).order("created_at",{ascending:false}).limit(300);
+    if(filter==="team")qy=qy.eq("team_tag",true);
+    else if(filter==="untagged")qy=qy.eq("team_tag",false).eq("players","{}");
+    else if(filter)qy=qy.contains("players",[filter]);
+    const rows=await q(qy);rows.forEach(r=>{mediaById[r.id]=r;});
+    const urls=await signedUrls(rows);
+    el.innerHTML=rows.map(m=>tileHtml(m,urls)).join("")||`<p class="note">${filter?"Nothing tagged here yet.":"No photos or videos yet. Add the first ones above."}</p>`;
+  }catch(e){el.innerHTML=`<p class="status err">${esc(/players|team_tag/.test(e.message||"")?"Photo tags aren't set up yet. Run supabase/005_players_media.sql in Supabase.":errText(e))}</p>`;}
+}
+const mediaById={};
 async function renderPhotos(){
   const note=$("#ph-note"),gal=$("#gallery");
   $("#ph-game").innerHTML=`<option value="">None</option>`+[...S.games].sort((a,b)=>b.date.localeCompare(a.date)).map(g=>`<option value="${g.id}">${dParts(g.date).m} ${dParts(g.date).d} ${g.home?"vs":"at"} ${esc(g.opp)}</option>`).join("");
+  $("#ph-tags").innerHTML=chipsHtml(upTags);
+  const f=$("#ph-filter"),cur=f.value;
+  f.innerHTML=`<option value="">Everything</option><option value="team">Team photos</option>${canEdit?`<option value="untagged">Not tagged yet</option>`:""}`+sortedPlayers().map(p=>`<option value="${p.id}">#${p.num} ${esc(p.name)}</option>`).join("");f.value=cur;
   if(!role){note.innerHTML=session?"Your account isn't on this team yet, so photos stay hidden. Ask the team admin to add you.":`Team photos and videos are for families on the team. <a href="#signin">Sign in or request a login</a> to see them.`;gal.innerHTML="";return;}
   note.textContent="Visible only to signed-in team members.";
-  gal.innerHTML=`<p class="note">Loading…</p>`;
-  try{
-    mediaRows=await q(sb.from("media").select("*").eq("team_id",TEAM.id).order("created_at",{ascending:false}).limit(300));
-    const paths=mediaRows.filter(m=>m.kind==="photo").map(m=>m.path);
-    const urls={};
-    if(paths.length){const {data}=await sb.storage.from("media").createSignedUrls(paths,3600);(data||[]).forEach(d=>{if(d.signedUrl)urls[d.path]=d.signedUrl;});}
-    const gname=id=>{const g=S.games.find(x=>x.id===id);return g?`${dParts(g.date).m} ${dParts(g.date).d} ${g.home?"vs":"at"} ${g.opp}`:"";};
-    gal.innerHTML=mediaRows.map(m=>{
-      const del=(m.created_by===me.id||isAdmin)?`<button class="linkbtn" data-mdel="${m.id}">Delete</button>`:"";
-      const cap=[m.caption,gname(m.game_id)].filter(Boolean).join(" · ");
-      if(m.kind==="video"){const id=ytId(m.url);return id?`<div class="tile video"><div class="vid"><iframe src="https://www.youtube-nocookie.com/embed/${id}" title="${esc(m.caption||"Team video")}" loading="lazy" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen></iframe></div><div class="cap"><span>${esc(cap)}</span>${del}</div></div>`:"";}
-      return urls[m.path]?`<div class="tile"><img src="${urls[m.path]}" alt="${esc(m.caption||"Team photo")}" loading="lazy" data-full="${urls[m.path]}"><div class="cap"><span>${esc(cap)}</span>${del}</div></div>`:"";
-    }).join("")||`<p class="note">No photos or videos yet. Add the first ones above.</p>`;
-  }catch(e){gal.innerHTML=`<p class="status err">${esc(errText(e))}</p>`;}
+  renderMedia(gal,f.value);
 }
+$("#ph-filter").addEventListener("change",()=>renderMedia($("#gallery"),$("#ph-filter").value));
 $("#ph-upload").onclick=async()=>{
-  const files=[...$("#ph-files").files],st=$("#ph-status"); if(!files.length){setStatus(st,"Choose one or more photos first.","err");return;}
-  $("#ph-upload").disabled=true; let ok=0;
+  const files=[...$("#ph-files").files],st=$("#ph-status");
+  if(!files.length){setStatus(st,"Choose one or more photos or clips first.","err");return;}
+  if(!upTags.size){setStatus(st,"Tap who's in it, or Team, so it shows up on the right player pages.","err");return;}
+  const big=files.find(f=>f.type.startsWith("video/")&&f.size>50*1024*1024);
+  if(big){setStatus(st,`${big.name} is over 50 MB. Trim it to the play, record at 720p, or use a YouTube link.`,"err");return;}
+  $("#ph-upload").disabled=true;let ok=0;
   try{
     for(const f of files){
       setStatus(st,`Uploading ${ok+1} of ${files.length}…`);
-      const blob=await resizeImage(f,2048,.85),path=`${TEAM.id}/${uuid()}.jpg`;
-      const up=await sb.storage.from("media").upload(path,blob,{contentType:"image/jpeg"}); if(up.error)throw up.error;
-      await q(sb.from("media").insert({team_id:TEAM.id,kind:"photo",path,caption:$("#ph-cap").value.trim(),game_id:$("#ph-game").value||null}));
+      const isVid=f.type.startsWith("video/");
+      const blob=isVid?f:await resizeImage(f,2048,.85);
+      const ext=isVid?((f.name.match(/\.(mp4|mov|webm|m4v)$/i)||[,"mp4"])[1].toLowerCase()):"jpg";
+      const path=`${TEAM.id}/${uuid()}.${ext}`,mime=isVid?(f.type||"video/mp4"):"image/jpeg";
+      const up=await sb.storage.from("media").upload(path,blob,{contentType:mime});if(up.error)throw up.error;
+      await q(sb.from("media").insert({team_id:TEAM.id,kind:isVid?"video":"photo",path,mime,caption:$("#ph-cap").value.trim(),game_id:$("#ph-game").value||null,...tagFields(upTags)}));
       ok++;
     }
-    setStatus(st,`Added ${ok} photo${ok>1?"s":""}.`,"ok"); $("#ph-files").value=""; $("#ph-cap").value=""; renderPhotos();
-  }catch(e){setStatus(st,(ok?`Added ${ok}, then stopped: `:"")+errText(e),"err");}
+    setStatus(st,`Added ${ok}.`,"ok");$("#ph-files").value="";$("#ph-cap").value="";upTags=new Set();$("#ph-tags").innerHTML=chipsHtml(upTags);renderMedia($("#gallery"),$("#ph-filter").value);
+  }catch(e){setStatus(st,(ok?`Added ${ok}, then stopped: `:"")+(/players|team_tag|mime/.test(e.message||"")?"Photo tags aren't set up yet. Run supabase/005_players_media.sql in Supabase.":errText(e)),"err");}
   finally{$("#ph-upload").disabled=false;}
 };
 $("#vd-add").onclick=async()=>{
   const u=$("#vd-url").value.trim(),st=$("#ph-status");
   if(!ytId(u)){setStatus(st,"That doesn't look like a YouTube link. Copy it from YouTube's Share button.","err");return;}
-  try{await q(sb.from("media").insert({team_id:TEAM.id,kind:"video",url:u,caption:$("#vd-cap").value.trim()}));setStatus(st,"Video added.","ok");$("#vd-url").value="";$("#vd-cap").value="";renderPhotos();}
+  if(!upTags.size){setStatus(st,"Tap who's in it, or Team, first.","err");return;}
+  try{await q(sb.from("media").insert({team_id:TEAM.id,kind:"video",url:u,caption:$("#ph-cap").value.trim(),game_id:$("#ph-game").value||null,...tagFields(upTags)}));
+    setStatus(st,"Video added.","ok");$("#vd-url").value="";$("#ph-cap").value="";upTags=new Set();$("#ph-tags").innerHTML=chipsHtml(upTags);renderMedia($("#gallery"),$("#ph-filter").value);}
   catch(e){setStatus(st,errText(e),"err");}
 };
-let pendingDel=null;
-$("#gallery").addEventListener("click",async e=>{
+let pendingDel=null,tagSel=null,tagId=null;
+async function onMediaClick(e){
   const img=e.target.closest("img[data-full]");
   if(img){$("#lb-img").src=img.dataset.full;$("#lb-img").alt=img.alt;$("#lightbox").hidden=false;return;}
-  const d=e.target.closest("[data-mdel]"); if(!d)return;
+  const t=e.target.closest("[data-mtag]");
+  if(t){const m=mediaById[t.dataset.mtag];tagId=m.id;tagSel=new Set([...(m.players||[]),...(m.team_tag?["team"]:[])]);$("#tag-chips").innerHTML=chipsHtml(tagSel);$("#tag-cap").value=m.caption||"";setStatus($("#tag-status"),"");$("#tag-sheet").hidden=false;$("#tag-save").focus();return;}
+  const d=e.target.closest("[data-mdel]");if(!d)return;
   if(pendingDel!==d.dataset.mdel){pendingDel=d.dataset.mdel;d.textContent="Tap again to delete";setTimeout(()=>{if(pendingDel===d.dataset.mdel){pendingDel=null;d.textContent="Delete";}},4000);return;}
-  pendingDel=null; const m=mediaRows.find(x=>x.id===d.dataset.mdel);
-  try{if(m.kind==="photo")await sb.storage.from("media").remove([m.path]);await q(sb.from("media").delete().eq("id",m.id));renderPhotos();}
+  pendingDel=null;const m=mediaById[d.dataset.mdel];
+  try{if(m.path)await sb.storage.from("media").remove([m.path]);await q(sb.from("media").delete().eq("id",m.id));d.closest(".tile").remove();}
   catch(err){setStatus($("#ph-status"),errText(err),"err");}
+}
+$("#gallery").addEventListener("click",onMediaClick);
+$("#pl-gallery").addEventListener("click",onMediaClick);
+$("#tag-chips").addEventListener("click",e=>chipToggle(e,tagSel));
+$("#tag-cancel").onclick=()=>{$("#tag-sheet").hidden=true;};
+$("#tag-sheet").addEventListener("click",e=>{if(e.target.id==="tag-sheet")$("#tag-sheet").hidden=true;});
+$("#tag-save").onclick=async()=>{
+  const st=$("#tag-status");
+  try{const f={...tagFields(tagSel),caption:$("#tag-cap").value.trim()};await q(sb.from("media").update(f).eq("id",tagId));Object.assign(mediaById[tagId],f);$("#tag-sheet").hidden=true;
+    if(curView==="player")renderPlayer(curPlayer);else renderMedia($("#gallery"),$("#ph-filter").value);}
+  catch(e){setStatus(st,errText(e),"err");}
+};
+
+// ---------- player pages ----------
+let curPlayer=null,curView=null;
+const TOPICS={general:"General",hitting:"Hitting",pitching:"Pitching",fielding:"Fielding",baserunning:"Baserunning",effort:"Effort and attitude"};
+const plink=p=>`<a class="pl" href="#player-${p.id}">${esc(p.name)}</a>`;
+function renderPlayer(pid){
+  const p=S.players.find(x=>x.id===pid);
+  if(!p){$("#pl-name").textContent="Player not found";$("#pl-num").textContent="";$("#pl-stats").innerHTML="";$("#pl-log").innerHTML="";return;}
+  document.title=`${p.name} · ${S.team.name}`;
+  $("#pl-num").textContent=p.num;$("#pl-name").textContent=p.name;
+  const B=batTotals("")[pid],P=pitTotals("")[pid];
+  const F=(()=>{const x={g:0,po:0,a:0,e:0};for(const L of Object.values(S.lines)){const f=(L.fld||{})[pid];if(f){x.g++;x.po+=+f.po||0;x.a+=+f.a||0;x.e+=+f.e||0;}}x.tc=x.po+x.a+x.e;x.pct=x.tc?(x.po+x.a)/x.tc:NaN;return x;})();
+  const last=(()=>{let l=null;for(const g of [...S.games].sort((a,b)=>a.date.localeCompare(b.date))){const q_=((S.lines[g.id]||{}).pit||{})[pid];if(q_)l={date:g.date,pc:+q_.pc||0};}return l;})();
+  let rest="";if(last){const need=restDays(last.pc),d=new Date(last.date+"T12:00"),free=new Date(d);free.setDate(d.getDate()+need+1);const ok=new Date(today()+"T12:00")>=free;rest=`<span class="chip ${ok?"ok":"rest"}">${ok?"Available to pitch":"Rest until "+MON[free.getMonth()]+" "+free.getDate()}</span>`;}
+  $("#pl-sub").innerHTML=[S.team.name,S.team.season].filter(Boolean).map(esc).join(" · ")+(rest?" "+rest:"");
+  const tbl=(cols,row)=>`<div class="tbl-wrap"><table><thead><tr>${cols.map(([,l])=>`<th style="cursor:default">${l}</th>`).join("")}</tr></thead><tbody><tr>${cols.map(([k,,f])=>`<td>${f?f(row[k],row):row[k]}</td>`).join("")}</tr></tbody></table></div>`;
+  let html="";
+  html+=B?`<div><h3 style="margin-bottom:6px">Batting</h3>${tbl([["g","G"],["pa","PA"],...BAT,["avg","AVG",fmt3],["obp","OBP",fmt3],["slg","SLG",fmt3],["ops","OPS",fmt3]],B)}</div>`:`<p class="note">No at-bats yet.</p>`;
+  if(P)html+=`<div><h3 style="margin-bottom:6px">Pitching</h3>${tbl([["g","G"],["outs","IP",v=>outsToIp(v)],["pc","Pitches"],["h","H"],["r","R"],["er","ER"],["bb","BB"],["so","K"],["era","ERA",fmt2],["whip","WHIP",fmt2]],P)}</div>`;
+  if(F.g)html+=`<div><h3 style="margin-bottom:6px">Fielding</h3>${tbl([["g","G"],["po","PO"],["a","A"],["e","E"],["tc","TC"],["pct","FLD%",fmt3]],F)}</div>`;
+  $("#pl-stats").innerHTML=html;
+  const games=[...S.games].filter(g=>{const L=S.lines[g.id];return L&&((L.bat||{})[pid]||(L.pit||{})[pid]||(L.fld||{})[pid]);}).sort((a,b)=>b.date.localeCompare(a.date));
+  $("#pl-log").innerHTML=games.length?`<thead><tr><th class="l" style="cursor:default">Game</th><th style="cursor:default">Result</th><th style="cursor:default">Batting</th><th style="cursor:default">Pitching</th><th style="cursor:default">Fielding</th></tr></thead><tbody>`+games.map(g=>{
+    const L=S.lines[g.id],b=(L.bat||{})[pid],q_=(L.pit||{})[pid],f=(L.fld||{})[pid];
+    const bs=b?[`${b.h}-${b.ab}`,b.d?`${b.d} 2B`:"",b.t?`${b.t} 3B`:"",b.hr?`${b.hr} HR`:"",b.rbi?`${b.rbi} RBI`:"",b.r?`${b.r} R`:"",b.bb?`${b.bb} BB`:"",b.so?`${b.so} K`:"",b.sb?`${b.sb} SB`:""].filter(Boolean).join(", "):"";
+    const ps=q_?`${outsToIp(q_.outs||0)} IP, ${q_.pc||0} P, ${q_.so||0} K, ${q_.er||0} ER`:"";
+    const fs=f?`${f.po||0} PO, ${f.a||0} A${f.e?`, ${f.e} E`:""}`:"";
+    const res=g.us!=null?`${g.us>g.them?"W":g.us<g.them?"L":"T"} ${g.us}–${g.them}`:"";
+    return `<tr><td class="l">${dParts(g.date).m} ${dParts(g.date).d} ${g.home?"vs":"at"} ${esc(g.opp)}</td><td>${res}</td><td>${bs}</td><td>${ps}</td><td>${fs}</td></tr>`;}).join("")+`</tbody>`:`<tbody><tr><td class="l note">No games yet.</td></tr></tbody>`;
+  if(role)renderMedia($("#pl-gallery"),pid);else $("#pl-gallery").innerHTML="";
+  if(isAdmin)renderNotes(pid);
+}
+async function renderNotes(pid){
+  const box=$("#pl-notes");
+  try{
+    const rows=await q(sb.from("player_notes").select("*").eq("player_id",pid).order("created_at",{ascending:false}).limit(200));
+    box.innerHTML=rows.map(n=>`<div class="note-item" data-nid="${n.id}"><div class="meta"><span class="topic">${TOPICS[n.topic]||"General"}</span><span>${esc(n.by_name||"Coach")}</span><span>${esc(new Date(n.created_at).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"}))}</span><button class="linkbtn" data-ndel="${n.id}">Delete</button></div><div class="body">${esc(n.body)}</div></div>`).join("")||`<p class="note">No notes yet.</p>`;
+  }catch(e){box.innerHTML=`<p class="status err">${esc(/player_notes/.test(e.message||"")?"Coach notes aren't set up yet. Run supabase/005_players_media.sql in Supabase.":errText(e))}</p>`;}
+}
+$("#pl-note-form").addEventListener("submit",async e=>{
+  e.preventDefault();const st=$("#pl-note-status"),body=$("#pl-note-body").value.trim();
+  if(!body){setStatus(st,"Write a note first.","err");return;}
+  try{await q(sb.from("player_notes").insert({team_id:TEAM.id,player_id:curPlayer,topic:$("#pl-note-topic").value,body,by_name:me.name||me.email}));
+    $("#pl-note-body").value="";setStatus(st,"Saved.","ok");renderNotes(curPlayer);}
+  catch(err){setStatus(st,/player_notes/.test(err.message||"")?"Coach notes aren't set up yet. Run supabase/005_players_media.sql in Supabase.":errText(err),"err");}
+});
+let pendingNoteDel=null;
+$("#pl-notes").addEventListener("click",async e=>{
+  const d=e.target.closest("[data-ndel]");if(!d)return;
+  if(pendingNoteDel!==d.dataset.ndel){pendingNoteDel=d.dataset.ndel;d.textContent="Tap again to delete";return;}
+  pendingNoteDel=null;try{await q(sb.from("player_notes").delete().eq("id",d.dataset.ndel));renderNotes(curPlayer);}catch(err){setStatus($("#pl-note-status"),errText(err),"err");}
 });
 $("#lightbox").onclick=()=>{$("#lightbox").hidden=true;};
 
@@ -544,9 +648,11 @@ $("#nt-name").addEventListener("input",()=>{if(!$("#nt-id").dataset.touched)$("#
 $("#nt-id").addEventListener("input",()=>{$("#nt-id").dataset.touched="1";$("#nt-preview").textContent=location.origin+"/"+(slug($("#nt-id").value)||"web-name");});
 
 // ---------- routing ----------
-const VIEWS=["schedule","live","stats","roster","photos","scorebook","sheet","admin","signin","account","teams"];
+const VIEWS=["schedule","live","stats","roster","photos","scorebook","sheet","admin","signin","account","teams","player"];
 function route(){
-  let v=location.hash.slice(1); if(!VIEWS.includes(v))v="schedule";
+  let v=location.hash.slice(1);
+  if(v.startsWith("player-")){curPlayer=v.slice(7);v="player";}
+  if(!VIEWS.includes(v))v="schedule";
   if(!TEAM)v="teams";
   else{
     if(!canEdit&&["scorebook","sheet"].includes(v))v="signin";
@@ -555,7 +661,10 @@ function route(){
     if(v==="signin"&&session&&role)v="schedule";
   }
   for(const x of VIEWS)$("#v-"+x).hidden=x!==v;
-  $$("nav.tabs a").forEach(a=>a.getAttribute("data-v")===v?a.setAttribute("aria-current","page"):a.removeAttribute("aria-current"));
+  const navV=v==="player"?"roster":v;curView=v;
+  $$("nav.tabs a").forEach(a=>a.getAttribute("data-v")===navV?a.setAttribute("aria-current","page"):a.removeAttribute("aria-current"));
+  if(v!=="player"&&TEAM)document.title=`${S.team.name} Baseball`;
+  if(v==="player"){renderPlayer(curPlayer);window.scrollTo(0,0);}
   if(!TEAM)return;
   if(v==="admin"){renderAdmin();renderSpondAdmin();loadRequests();}
   if(v==="photos")renderPhotos();
@@ -800,7 +909,7 @@ let sheetState=null;
 function openSheet(html){$("#lv-sheet-card").innerHTML=html;$("#lv-sheet").hidden=false;const f=$("#lv-sheet-card button");if(f)f.focus();}
 function closeSheet(){$("#lv-sheet").hidden=true;sheetState=null;}
 $("#lv-sheet").addEventListener("click",e=>{if(e.target.id==="lv-sheet")closeSheet();});
-document.addEventListener("keydown",e=>{if(e.key==="Escape"){if(!$("#lv-sheet").hidden)closeSheet();$("#lightbox").hidden=true;}});
+document.addEventListener("keydown",e=>{if(e.key==="Escape"){if(!$("#lv-sheet").hidden)closeSheet();$("#lightbox").hidden=true;$("#tag-sheet").hidden=true;}});
 function defaultDest(r,bases,batter){
   const d={},adv={"1b":1,"2b":2,"3b":3,"hr":4,"sac":1}[r],put=(id,i,n)=>{const t=i+1+n;d[id]=t>3?"H":t;};
   if(["bb","hbp","e","fc"].includes(r)){d[batter]=1;if(bases[0]){d[bases[0]]=2;if(bases[1]){d[bases[1]]=3;if(bases[2])d[bases[2]]="H";}}bases.forEach((id,i)=>{if(id&&!(id in d))d[id]=i+1;});}
@@ -910,7 +1019,7 @@ async function boot(){
   let tid=pick?null:teamIdFromUrl();
   if(tid&&!teams.some(t=>t.id===tid)){tid=null;}
   if(!tid&&!pick&&teams.length===1)tid=teams[0].id;
-  if(!tid&&!pick){const last=lsGet("rr-team");if(last&&teams.some(t=>t.id===last))tid=last;}
+  // With several teams, the bare address shows the team list instead of guessing.
   TEAM=teams.find(t=>t.id===tid)||null;
   // Put the team's own address in the bar (e.g. /eastlake) without reloading.
   if(TEAM&&!(CFG.hostTeams||{})[location.hostname]&&location.pathname!=="/"+TEAM.id){try{history.replaceState(null,"","/"+encodeURIComponent(TEAM.id)+(location.hash||"#schedule"));}catch(e){}}

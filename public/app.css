@@ -218,3 +218,22 @@ a.btn.primary{background:var(--red);color:#fff}
   .sheet{border:0;padding:0}
   @page{size:letter landscape;margin:.4in}
 }
+
+/* ---- player pages, tags ---- */
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.chips button{font-family:var(--f-body);text-transform:none;letter-spacing:0;font-weight:600;font-size:14px;border:1.5px solid var(--line);background:var(--surface);color:var(--fg);padding:6px 10px;border-radius:999px}
+.chips button[aria-pressed="true"]{background:var(--red);border-color:var(--red);color:#fff}
+.chips button.team{border-color:var(--fg)}
+.f-label{font-family:var(--f-head);text-transform:uppercase;letter-spacing:.08em;font-size:12px;color:var(--muted)}
+.tags{display:flex;flex-wrap:wrap;gap:4px;padding:0 8px 8px}
+.tags a,.tags span{font-size:12px;background:var(--soft);color:var(--fg);padding:2px 7px;border-radius:999px;text-decoration:none}
+.tile video{width:100%;aspect-ratio:16/9;background:#000;display:block}
+.player-head{display:flex;gap:16px;align-items:center}
+.jersey.big{font-size:56px;min-width:70px;line-height:1}
+.note-item{border-top:1px solid var(--line);padding:10px 0;display:flex;flex-direction:column;gap:4px}
+.note-item .meta{font-size:12px;color:var(--muted);display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.note-item .body{white-space:pre-wrap;overflow-wrap:anywhere}
+.topic{font-family:var(--f-head);text-transform:uppercase;letter-spacing:.06em;font-weight:700;font-size:11px;background:var(--soft);padding:1px 6px;border-radius:2px;color:var(--fg)}
+a.pl{color:inherit;text-decoration:none;border-bottom:1px dotted var(--muted)}
+a.pl:hover{color:var(--red-ink)}
+details summary{cursor:pointer;font-weight:600}
