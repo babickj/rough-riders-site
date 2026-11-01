@@ -50,12 +50,18 @@ Paste the Project URL and anon key into `public/config.js` and commit it. Both a
 
 Spond has no official public API; this uses the same calls as the open-source Spond library, so it may need updating if Spond changes them. Only games sync (practices and similar events are skipped). Name games like "vs Cardinals" or "@ Padres".
 
+### 5. More teams
+1. In Supabase **SQL Editor**, run `supabase/004_multi_team.sql` once (per-team pitch rules).
+2. Signed in as the site owner, go to **Admin > Teams**, enter the team name, a web name (e.g. `eastlake`), and the level, then **Add team**.
+3. The team lives at `/<web-name>` (e.g. `/eastlake`). Upload its logo in that team's Admin, set its season, and connect its Spond group if it has one.
+4. People, roles, photos, stats and access requests are separate per team. The site owner is admin on every team; other coaches can be added to every team at once with **Add to every team**.
+
 ### Later: your own web address
 In the Worker, **Settings > Domains & Routes > Add > Custom domain**. For one address per team, add each one and map it in `config.js`:
 ```js
 hostTeams: { "riders.example.com": "rough-riders", "team2.example.com": "team-two" }
 ```
-Without that, each team is reachable at `/?team=<web-name>`.
+Without that, each team is reachable at `/<web-name>`.
 
 ## Notes
 - Free tiers: Supabase pauses a project after a week with no activity. Opening the site counts as activity; in the off-season, restore it from the Supabase dashboard if it pauses.

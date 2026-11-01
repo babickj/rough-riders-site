@@ -9,7 +9,7 @@ const sb=configured?window.supabase.createClient(CFG.supabaseUrl,CFG.supabaseAno
 
 let S=null, TEAM=null, teams=[], session=null, role=null, siteAdmin=false, canEdit=false, isAdmin=false, aiEnabled=false;
 const me={id:null,email:"",name:""};
-let curLineup=null, pendingEnter=null, pendingData=null;
+let curLineup=null, pendingEnter=null, pendingData=null, myTeams=[];
 
 const BAT=[["ab","AB"],["r","R"],["h","H"],["d","2B"],["t","3B"],["hr","HR"],["rbi","RBI"],["bb","BB"],["so","K"],["hbp","HBP"],["sb","SB"]];
 const PIT=[["ip","IP"],["pc","Pitches"],["h","H"],["r","R"],["er","ER"],["bb","BB"],["so","K"]];
@@ -31,12 +31,32 @@ function lsGet(k){try{return localStorage.getItem(k)}catch(e){return null}}
 function lsSet(k,v){try{localStorage.setItem(k,v)}catch(e){}}
 
 // ---------- data ----------
+// A team's address is its web name as the first part of the path (/eastlake), a mapped
+// host name from config.js, or the older ?team= form.
 function teamIdFromUrl(){
   const host=location.hostname, map=CFG.hostTeams||{};
   if(map[host])return map[host];
+  const seg=decodeURIComponent(location.pathname.split("/")[1]||"").toLowerCase();
+  if(seg)return seg;
   return new URLSearchParams(location.search).get("team");
 }
-const teamLink=id=>`${location.pathname}?team=${encodeURIComponent(id)}#schedule`;
+const teamPath=id=>{const host=Object.keys(CFG.hostTeams||{}).find(h=>CFG.hostTeams[h]===id);return host?`https://${host}/`:`/${encodeURIComponent(id)}`;};
+const teamLink=id=>teamPath(id)+"#schedule";
+const teamUrl=id=>{const p=teamPath(id);return p.startsWith("http")?p:location.origin+p;};
+// Pitch-count rest rules: [[min pitches, days of rest], ...] highest first.
+const PITCH_PRESETS={
+  "ll":{max:85,rest:[[66,4],[51,3],[36,2],[21,1]],label:"Little League rules for ages 7–16 (daily limit is 75 for ages 9–10, 85 for 11–12)"},
+  "cif-v":{max:110,rest:[[76,3],[51,2],[31,1]],label:"CIF high school varsity rules (110 pitches a game)"},
+  "cif-jv":{max:90,rest:[[76,3],[51,2],[31,1]],label:"CIF high school JV and frosh rules (90 pitches a game)"}};
+const restTiers=()=>Array.isArray(TEAM&&TEAM.pitch_rest)&&TEAM.pitch_rest.length?TEAM.pitch_rest:PITCH_PRESETS.ll.rest;
+function presetFor(max,rest){const key=JSON.stringify(rest||PITCH_PRESETS.ll.rest);for(const [k,v] of Object.entries(PITCH_PRESETS))if(JSON.stringify(v.rest)===key&&(k==="ll"||v.max===max))return k;return "custom";}
+const fmtRest=r=>r.map(([p,d])=>`${p}:${d}`).join(", ");
+function parseRest(s){const out=[];for(const part of String(s).split(/[,;]+/)){const m=part.trim().match(/^(\d+)\s*[:=\-]\s*(\d+)$/);if(!part.trim())continue;if(!m)return null;out.push([+m[1],+m[2]]);}return out.sort((a,b)=>b[0]-a[0]);}
+function restNote(){
+  const r=restTiers(),k=presetFor(S.team.pitchMax,TEAM.pitch_rest&&TEAM.pitch_rest.length?TEAM.pitch_rest:null);
+  const tiers=r.map(([p,d],i)=>`${p}${i===0?" or more":"–"+(r[i-1][0]-1)} pitches needs ${d} day${d>1?"s":""}`).join(", ");
+  return `Rest days follow ${k==="custom"?"this team's rules":PITCH_PRESETS[k].label}: ${tiers}. Fewer than ${r[r.length-1][0]} needs no rest. Daily limit: ${S.team.pitchMax}. Check your league's current rulebook if anything changes.`;
+}
 function logoUrl(t){
   if(t.logo_path)return sb.storage.from("logos").getPublicUrl(t.logo_path).data.publicUrl;
   return `/logos/${t.id}.jpg`;
@@ -85,7 +105,7 @@ const blobToB64=b=>new Promise(r=>{const fr=new FileReader();fr.onload=()=>r(Str
 
 // ---------- auth ----------
 async function refreshRole(){
-  role=null;siteAdmin=false;me.id=null;me.email="";me.name="";
+  role=null;siteAdmin=false;me.id=null;me.email="";me.name="";myTeams=[];
   if(session){
     me.id=session.user.id;me.email=session.user.email||"";me.name=session.user.user_metadata?.name||"";
     try{
@@ -94,6 +114,8 @@ async function refreshRole(){
         sb.from("site_admins").select("user_id").eq("user_id",me.id)]);
       role=m.data?.[0]?.role||null; if(m.data?.[0]?.display_name)me.name=m.data[0].display_name;
       siteAdmin=!!sa.data?.length; if(siteAdmin)role="admin";
+      if(siteAdmin)myTeams=teams.map(t=>t.id);
+      else{const all=await sb.from("memberships").select("team_id").eq("user_id",me.id);myTeams=(all.data||[]).map(x=>x.team_id);}
     }catch(e){}
   }
   canEdit=role==="admin"||role==="scorekeeper"; isAdmin=role==="admin";
@@ -104,7 +126,7 @@ async function refreshRole(){
 }
 function renderAcct(){
   const a=$("#acct");
-  if(session)a.innerHTML=`<div>${esc(me.name||me.email)}</div>${role?`<span class="role">${role==="admin"?"Admin":role==="scorekeeper"?"Scorekeeper":"Parent"}</span>`:""}<div><a href="#account">My account</a> · <a href="#" data-signout>Sign out</a></div>`;
+  if(session)a.innerHTML=`<div>${esc(me.name||me.email)}</div>${role?`<span class="role">${role==="admin"?"Admin":role==="scorekeeper"?"Scorekeeper":"Parent"}</span>`:""}<div><a href="#account">My account</a>${myTeams.length>1?` · <a href="/?pick=1">Switch team</a>`:""} · <a href="#" data-signout>Sign out</a></div>`;
   else a.innerHTML="";
   $("#rq-form").hidden=!!session;
   const st=$("#si-state");
@@ -158,7 +180,7 @@ function record(){let w=0,l=0,t=0,rs=0,ra=0;for(const g of S.games)if(g.status==
 function renderHeader(){
   document.title=`${S.team.name} Baseball`;
   const lg=$("#logo"); lg.src=logoUrl(TEAM); lg.alt=`${S.team.name} logo`; lg.onerror=()=>{lg.hidden=true;}; lg.onload=()=>{lg.hidden=false;};
-  $("#si-logo").src=lg.src;
+  $("#si-logo").src=lg.src;$("#favicon").href=lg.src;
   $("#h-season").textContent=[S.team.name,S.team.season,S.team.league].filter(Boolean).join(" · ");
   const r=record();
   $("#h-record").innerHTML=`<div><b>${r.w}–${r.l}${r.t?"–"+r.t:""}</b><span>Record</span></div><div><b>${r.rs}</b><span>Runs scored</span></div><div><b>${r.ra}</b><span>Runs allowed</span></div>`;
@@ -236,8 +258,9 @@ function renderStats(){
   }
   renderAvail();
 }
-function restDays(pc){return pc>=66?4:pc>=51?3:pc>=36?2:pc>=21?1:0;}
+function restDays(pc){for(const [p,d] of restTiers())if(pc>=p)return d;return 0;}
 function renderAvail(){
+  $("#rest-note").textContent=restNote();
   const last={};
   for(const g of [...S.games].sort((a,b)=>a.date.localeCompare(b.date))){const L=S.lines[g.id];if(!L)continue;for(const [pid,p] of Object.entries(L.pit||{}))last[pid]={date:g.date,pc:+p.pc||0};}
   const t=new Date(today()+"T12:00");
@@ -252,6 +275,7 @@ function renderRoster(){
   $("#roster").innerHTML=sortedPlayers().map(p=>{const b=T[p.id],q=P[p.id];
     return `<div class="card"><div class="jersey">${p.num}</div><div style="min-width:0;flex:1"><div class="nm">${esc(p.name)}</div><div class="ln">${b?`${fmt3(b.avg)} AVG · ${b.h} H · ${b.rbi} RBI`:"No at-bats yet"}</div>${q?`<div class="ln">${outsToIp(q.outs)} IP · ${fmt2(q.era)} ERA</div>`:""}${canEdit?`<button class="linkbtn" data-pedit="${p.id}">Edit</button>`:""}</div></div>`}).join("")||`<p class="note">No players yet.</p>`;
   $("#ts-season").value=S.team.season||"";$("#ts-league").value=S.team.league||"";$("#ts-inn").value=inn();$("#ts-pmax").value=S.team.pitchMax||85;
+  $("#ts-prest").value=fmtRest(restTiers());$("#ts-prules").value=presetFor(S.team.pitchMax,TEAM.pitch_rest&&TEAM.pitch_rest.length?TEAM.pitch_rest:null);
 }
 
 // ---------- entry ----------
@@ -395,7 +419,8 @@ async function renderAdmin(){
     setStatus(st,members.length?"":"No one added yet.");
   }catch(e){setStatus(st,errText(e),"err");}
   $("#ad-teams").hidden=!siteAdmin;
-  if(siteAdmin)$("#ad-teamlist").innerHTML=`<p>${teams.map(t=>`<a href="${teamLink(t.id)}">${esc(t.name)}</a>`).join(" · ")}</p>`;
+  if(siteAdmin){$("#ad-teamlist").innerHTML=`<div class="tbl-wrap"><table class="members"><tbody>${teams.map(t=>`<tr><td class="l"><b>${esc(t.name)}</b>${t.id===TEAM.id?" (this team)":""}</td><td class="l"><a href="${teamLink(t.id)}">${esc(teamUrl(t.id))}</a></td></tr>`).join("")}</tbody></table></div>`;$("#nt-preview").textContent=location.origin+"/web-name";}
+  $("#ad-all-wrap").hidden=!(siteAdmin&&teams.length>1);
   try{
     const log=await q(sb.from("activity").select("*").eq("team_id",TEAM.id).order("at",{ascending:false}).limit(25));
     $("#ad-log").innerHTML=log.length?`<thead><tr><th class="l">When</th><th class="l">Who</th><th class="l">Change</th></tr></thead><tbody>${log.map(l=>`<tr><td class="l">${esc(new Date(l.at).toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}))}</td><td class="l">${esc(l.by_name||"Someone")}</td><td class="l">${esc(l.what)}</td></tr>`).join("")}</tbody>`:"";
@@ -422,14 +447,17 @@ $("#ad-add").onclick=async()=>{
   if(!email){setStatus(st,"Enter their email.","err");return;}
   setStatus(st,"Adding…");
   try{const res=await api("/api/admin",{action:"add",team_id:TEAM.id,name,email,role:r,password:pw});
-    setStatus(st,res.created?`Added ${name||email}.`:`Added ${name||email}. They already had an account, so their password didn't change.`,"ok");
+    if(siteAdmin&&$("#ad-all").checked)for(const t of teams)if(t.id!==TEAM.id)await api("/api/admin",{action:"add",team_id:t.id,name,email,role:r,password:pw});
+    const where=siteAdmin&&$("#ad-all").checked?" to every team":"";
+    setStatus(st,res.created?`Added ${name||email}${where}.`:`Added ${name||email}${where}. They already had an account, so their password didn't change.`,"ok");$("#ad-all").checked=false;
     if(res.created)showPw(name||email,pw);
     $("#ad-name").value="";$("#ad-email").value="";logAct(`Added ${name||email} as ${r}`);renderAdmin();}
   catch(e){setStatus(st,e.message,"err");}
 };
 $("#nt-add").onclick=async()=>{
   const st=$("#nt-status");
-  try{const r=await api("/api/admin",{action:"create_team",name:$("#nt-name").value.trim(),id:$("#nt-id").value.trim()});setStatus(st,"Team added. Opening it…","ok");location.href=teamLink(r.team.id);}
+  const lv=PITCH_PRESETS[$("#nt-level").value];
+  try{const r=await api("/api/admin",{action:"create_team",name:$("#nt-name").value.trim(),id:$("#nt-id").value.trim(),innings:$("#nt-level").value==="ll"?6:7,pitch_max:lv.max,pitch_rest:lv.rest});setStatus(st,"Team added. Opening it…","ok");location.href=teamLink(r.team.id);}
   catch(e){setStatus(st,e.message,"err");}
 };
 $("#lg-up").onclick=async()=>{
@@ -511,6 +539,10 @@ $("#rq-list").addEventListener("click",async e=>{
   }catch(err){setStatus(st,err.message||errText(err),"err");}
 });
 
+const slug=s=>String(s).toLowerCase().replace(/[^a-z0-9-]/g,"-").replace(/-+/g,"-").replace(/^-|-$/g,"");
+$("#nt-name").addEventListener("input",()=>{if(!$("#nt-id").dataset.touched)$("#nt-id").value=slug($("#nt-name").value);$("#nt-preview").textContent=location.origin+"/"+(slug($("#nt-id").value)||"web-name");});
+$("#nt-id").addEventListener("input",()=>{$("#nt-id").dataset.touched="1";$("#nt-preview").textContent=location.origin+"/"+(slug($("#nt-id").value)||"web-name");});
+
 // ---------- routing ----------
 const VIEWS=["schedule","live","stats","roster","photos","scorebook","sheet","admin","signin","account","teams"];
 function route(){
@@ -589,9 +621,12 @@ $("#pf-delete").onclick=async()=>{ // keep stats history: mark inactive instead 
   if(await run($("#ts-status"),`Removed ${p.name} from the roster`,()=>q(sb.from("players").update({active:false}).eq("id",p.id)))){p.active=false;render();$("#player-form").hidden=true;}
 };
 $("#ts-save").onclick=async()=>{
-  const v={season:$("#ts-season").value.trim(),league:$("#ts-league").value.trim(),innings:Math.min(9,Math.max(4,+$("#ts-inn").value||6)),pitch_max:Math.min(105,Math.max(20,+$("#ts-pmax").value||85))};
+  const rest=parseRest($("#ts-prest").value);
+  if(!rest||!rest.length){setStatus($("#ts-status"),"Write rest days like 66:4, 51:3 (pitches, then days).","err");return;}
+  const v={season:$("#ts-season").value.trim(),league:$("#ts-league").value.trim(),innings:Math.min(9,Math.max(4,+$("#ts-inn").value||6)),pitch_max:Math.min(150,Math.max(20,+$("#ts-pmax").value||85)),pitch_rest:rest};
   if(await run($("#ts-status"),"Updated team settings",()=>q(sb.from("teams").update(v).eq("id",TEAM.id)))){Object.assign(TEAM,v);Object.assign(S.team,{season:v.season,league:v.league,innings:v.innings,pitchMax:v.pitch_max});render();}
 };
+$("#ts-prules").addEventListener("change",e=>{const p=PITCH_PRESETS[e.target.value];if(!p)return;$("#ts-pmax").value=p.max;$("#ts-prest").value=fmtRest(p.rest);if(e.target.value!=="ll")$("#ts-inn").value=7;});
 $("#eg-game").addEventListener("change",()=>fillEntry());
 $("#sh-game").addEventListener("change",()=>{$("#sheet").innerHTML=sheetHTML($("#sh-game").value);});
 $("#sheet-print").onclick=()=>window.print();
@@ -726,7 +761,7 @@ async function undo(){const last=lvEvents[lvEvents.length-1];if(!last)return;
   lvEvents=lvEvents.slice(0,-1);renderLive();
   try{await q(sb.from("plays").delete().eq("id",last.id));}catch(e){flash("Couldn't undo. "+errText(e));fetchPlays();}}
 
-function restInfo(pc){const max=S.team.pitchMax||85,d=restDays(pc);return {d,max,cls:pc>=max-10?"w2":pc>=51?"w1":""};}
+function restInfo(pc){const max=S.team.pitchMax||85,d=restDays(pc),top=restTiers()[0][1];return {d,max,cls:pc>=max-10?"w2":d>=top-1&&d>0?"w1":""};}
 function renderLive(){
   const g=S.games.find(x=>x.id===lvGame);if(!g){$("#lv-board").innerHTML="";$("#lv-ctrl").innerHTML="";$("#lv-log").innerHTML="";return;}
   const st=lvState=replay(lvEvents,g),n=Math.max(inn(),st.inning),awayUs=!g.home;
@@ -871,11 +906,16 @@ async function boot(){
   if(!sb){document.body.innerHTML=`<main class="wrap" style="padding-block:40px"><h2>Almost there</h2><p>Add the Supabase project URL and anon key to <code>config.js</code>, then redeploy.</p></main>`;return;}
   try{teams=await q(sb.from("teams").select("*").order("name"));}
   catch(e){document.body.innerHTML=`<main class="wrap" style="padding-block:40px"><h2>Can't reach the team database</h2><p>${esc(errText(e))}</p></main>`;return;}
-  let tid=teamIdFromUrl();
-  if(!tid&&teams.length===1)tid=teams[0].id;
-  if(!tid){const last=lsGet("rr-team");if(last&&teams.some(t=>t.id===last))tid=last;}
+  const params=new URLSearchParams(location.search),pick=params.has("pick");
+  let tid=pick?null:teamIdFromUrl();
+  if(tid&&!teams.some(t=>t.id===tid)){tid=null;}
+  if(!tid&&!pick&&teams.length===1)tid=teams[0].id;
+  if(!tid&&!pick){const last=lsGet("rr-team");if(last&&teams.some(t=>t.id===last))tid=last;}
   TEAM=teams.find(t=>t.id===tid)||null;
+  // Put the team's own address in the bar (e.g. /eastlake) without reloading.
+  if(TEAM&&!(CFG.hostTeams||{})[location.hostname]&&location.pathname!=="/"+TEAM.id){try{history.replaceState(null,"","/"+encodeURIComponent(TEAM.id)+(location.hash||"#schedule"));}catch(e){}}
   if(!TEAM){
+    if(pick)try{history.replaceState(null,"","/");}catch(e){}
     $("#teampick").innerHTML=teams.map(t=>`<a href="${teamLink(t.id)}"><img src="${logoUrl(t)}" alt="" onerror="this.remove()"><b>${esc(t.name)}</b></a>`).join("")||`<p class="note">No teams yet. Run the database setup first.</p>`;
     $("header.band").hidden=true;$("nav.tabs").hidden=true;route();return;
   }

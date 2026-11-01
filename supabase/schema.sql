@@ -210,3 +210,6 @@ drop policy if exists "admins update requests" on public.access_requests;
 create policy "admins update requests" on public.access_requests for update using (public.has_role(team_id, array['admin']));
 drop policy if exists "admins delete requests" on public.access_requests;
 create policy "admins delete requests" on public.access_requests for delete using (public.has_role(team_id, array['admin']));
+
+-- ---------- per-team pitch rules (same as 004_multi_team.sql) ----------
+alter table public.teams add column if not exists pitch_rest jsonb;

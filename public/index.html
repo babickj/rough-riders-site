@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Rough Riders Baseball</title>
 <meta name="theme-color" content="#0B0B0C">
-<link rel="icon" href="/logos/rough-riders.jpg">
+<link rel="icon" id="favicon" href="/logos/rough-riders.jpg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700;800&display=swap">
 <link rel="stylesheet" href="/app.css">
@@ -77,7 +77,7 @@
     <div>
       <div class="sec-head" style="margin-bottom:8px"><h3>Pitcher availability today</h3></div>
       <div class="avail" id="avail"></div>
-      <p class="note" style="margin-top:8px">Rest days follow Little League pitch-count rules for ages 7–16: 66 or more pitches needs 4 days, 51–65 needs 3, 36–50 needs 2, 21–35 needs 1. Daily maximums depend on age (75 for ages 9–10, 85 for 11–12). Check the current rulebook if your league changes them.</p>
+      <p class="note" style="margin-top:8px" id="rest-note"></p>
     </div>
   </section>
 
@@ -98,7 +98,9 @@
         <label class="f">Season<input type="text" id="ts-season"></label>
         <label class="f">Division<input type="text" id="ts-league"></label>
         <label class="f">Innings per game<input type="number" id="ts-inn" min="4" max="9" style="width:80px"></label>
-        <label class="f">Daily pitch limit<input type="number" id="ts-pmax" min="20" max="105" style="width:90px"></label>
+        <label class="f">Pitch rules<select id="ts-prules"><option value="ll">Little League</option><option value="cif-v">High school varsity (CIF)</option><option value="cif-jv">High school JV / frosh (CIF)</option><option value="custom">Custom</option></select></label>
+        <label class="f">Daily pitch limit<input type="number" id="ts-pmax" min="20" max="150" style="width:90px"></label>
+        <label class="f">Rest days (pitches:days)<input type="text" id="ts-prest" style="width:200px" placeholder="66:4, 51:3, 36:2, 21:1"></label>
         <button type="button" id="ts-save">Save settings</button><span class="status" id="ts-status"></span>
       </div>
     </div>
@@ -249,6 +251,7 @@
         <label class="f">Name<input type="text" id="ad-name"></label>
         <label class="f">Email<input type="email" id="ad-email"></label>
         <label class="f">Role<select id="ad-role"><option value="parent">Parent</option><option value="scorekeeper">Scorekeeper</option><option value="admin">Admin</option></select></label>
+        <label class="row" id="ad-all-wrap" hidden style="gap:6px;align-self:center"><input type="checkbox" id="ad-all" style="width:18px;height:18px;accent-color:var(--red)"> Add to every team</label>
         <button class="primary" type="button" id="ad-add">Add person</button>
       </div>
       <p class="note">New accounts get a temporary password you can pass along. They can change it under My account. If the person already has an account from the other team, they keep their current password.</p>
@@ -258,11 +261,13 @@
       <h3>Teams</h3>
       <div id="ad-teamlist"></div>
       <div class="row">
-        <label class="f">Team name<input type="text" id="nt-name"></label>
-        <label class="f">Web name<input type="text" id="nt-id" placeholder="rough-riders-2"></label>
+        <label class="f">Team name<input type="text" id="nt-name" placeholder="Eastlake HS"></label>
+        <label class="f">Web name<input type="text" id="nt-id" placeholder="eastlake"></label>
+        <label class="f">Level<select id="nt-level"><option value="ll">Little League</option><option value="cif-v">High school varsity (CIF)</option><option value="cif-jv">High school JV / frosh (CIF)</option></select></label>
         <button type="button" id="nt-add">Add team</button>
       </div>
       <span class="status" id="nt-status"></span>
+      <p class="note">The web name becomes the team's address, for example <b id="nt-preview"></b>. Use lowercase letters, numbers, and dashes. You're automatically admin on every team.</p>
     </div>
     <div class="panel">
       <h3>Spond schedule sync</h3>
