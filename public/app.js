@@ -326,7 +326,7 @@ function renderRoster(){
   $("#roster").innerHTML=sortedPlayers().map(p=>{const b=T[p.id],q=P[p.id];
     return `<div class="card"><div class="jersey">${p.num}</div><div style="min-width:0;flex:1"><div class="nm">${plink(p)}</div>${isCoach?`<div class="ln">${b?`${fmt3(b.avg)} AVG · ${b.h} H · ${b.rbi} RBI`:"No at-bats yet"}</div>${q?`<div class="ln">${outsToIp(q.outs)} IP · ${fmt2(q.era)} ERA</div>`:""}`:""}${canEdit?`<button class="linkbtn" data-pedit="${p.id}">Edit</button>`:""}</div></div>`}).join("")||`<p class="note">No players yet.</p>`;
   if(hidden&&!canEdit)$("#roster").innerHTML="";
-  $("#ts-school").value=TEAM.school||"";$("#ts-announce").value=TEAM.announcement||"";
+  $("#ts-school").value=TEAM.school||"";$("#ts-name").value=TEAM.name||"";$("#ts-announce").value=TEAM.announcement||"";
   $("#ts-season").value=S.team.season||"";$("#ts-league").value=S.team.league||"";$("#ts-inn").value=inn();$("#ts-pmax").value=S.team.pitchMax||85;
   $("#ts-prest").value=fmtRest(restTiers());$("#ts-prules").value=presetFor(S.team.pitchMax,TEAM.pitch_rest&&TEAM.pitch_rest.length?TEAM.pitch_rest:null);
 }
@@ -1273,8 +1273,8 @@ $("#ts-save").onclick=async()=>{
   const rest=parseRest($("#ts-prest").value);
   if(!rest||!rest.length){setStatus($("#ts-status"),"Write rest days like 66:4, 51:3 (pitches, then days).","err");return;}
   const v={season:$("#ts-season").value.trim(),league:$("#ts-league").value.trim(),innings:Math.min(9,Math.max(4,+$("#ts-inn").value||6)),pitch_max:Math.min(150,Math.max(20,+$("#ts-pmax").value||85)),pitch_rest:rest,
-    school:$("#ts-school").value.trim()||null,announcement:$("#ts-announce").value.trim()||null};
-  if(await run($("#ts-status"),"Updated team settings",()=>q(sb.from("teams").update(v).eq("id",TEAM.id)))){Object.assign(TEAM,v);Object.assign(S.team,{season:v.season,league:v.league,innings:v.innings,pitchMax:v.pitch_max});render();}
+    school:$("#ts-school").value.trim()||null,announcement:$("#ts-announce").value.trim()||null,name:$("#ts-name").value.trim()||TEAM.name};
+  if(await run($("#ts-status"),"Updated team settings",()=>q(sb.from("teams").update(v).eq("id",TEAM.id)))){Object.assign(TEAM,v);Object.assign(S.team,{name:v.name,season:v.season,league:v.league,innings:v.innings,pitchMax:v.pitch_max});const t=teams.find(x=>x.id===TEAM.id);if(t)Object.assign(t,v);render();}
 };
 $("#ts-prules").addEventListener("change",e=>{const p=PITCH_PRESETS[e.target.value];if(!p)return;$("#ts-pmax").value=p.max;$("#ts-prest").value=fmtRest(p.rest);if(e.target.value!=="ll")$("#ts-inn").value=7;});
 $("#eg-game").addEventListener("change",()=>fillEntry());
