@@ -118,3 +118,9 @@ Without that, each team is reachable at `/<web-name>`.
 - Free tiers: Supabase pauses a project after a week with no activity. Opening the site counts as activity; in the off-season, restore it from the Supabase dashboard if it pauses.
 - Photos are resized to 2048px before upload to save space. Videos are YouTube links (upload as Unlisted).
 - Pitch-count rest days follow Little League rules: 66+ pitches 4 days, 51–65 3, 36–50 2, 21–35 1.
+
+### 12. TeamSnap (or any calendar link) schedule sync
+1. In Supabase **SQL Editor**, run `supabase/011_calendar_sync.sql` once.
+2. In TeamSnap on a computer: open the team, **Schedule > Settings > Sync Calendar / Export**, copy the calendar link. (GameChanger, SportsEngine, Google Calendar and others work too: use their "subscribe" or iCal link.)
+3. On the site, **Admin > TeamSnap or other calendar sync**, paste the link, press **Connect and sync**.
+4. Games re-sync every two hours with Spond, or with **Sync now** on the Schedule tab. Practices are skipped; cancelled games show as cancelled; games deleted in TeamSnap come off. The link is stored in `team_sync`, which only the server can read.
