@@ -2,8 +2,8 @@
 // The coach pastes the team's "subscribe" / iCal link once in Admin; the Worker re-reads it every 2 hours
 // (same timer as Spond) and adds, updates, cancels or removes games to match.
 //
-// The link itself is kept in team_sync, which only the server can read (a TeamSnap link can show
-// practices and notes), so it never reaches the public site.
+// The link itself is kept in a private storage file only the server can read (a TeamSnap link can
+// show practices and notes), so it never reaches the public site. No database changes needed.
 //
 // Games only, like the Spond sync: practices, meetings, and similar entries are skipped.
 // A game marked final on the site is never changed by a sync.
@@ -110,6 +110,28 @@ export async function fetchFeed(url) {
   return text;
 }
 
+// Settings live in a small private file in the "media" storage bucket: _sync/<team>.json.
+// Storage rules only let team staff read files under their own team's folder, so only the server
+// (secret key) can read these. No database changes needed.
+function store(env) {
+  const base = env.SUPABASE_URL.replace(/\/$/, ""), svc = env.SUPABASE_SERVICE_ROLE_KEY;
+  const h = { apikey: svc, ...(svc.startsWith("eyJ") ? { Authorization: `Bearer ${svc}` } : {}) };
+  const obj = (team) => `${base}/storage/v1/object/media/_sync/${enc(team)}.json`;
+  return {
+    get: async (team) => { const r = await fetch(obj(team), { headers: h }); return r.ok ? r.json().catch(() => null) : null; },
+    put: async (team, data) => {
+      const r = await fetch(obj(team), { method: "POST", headers: { ...h, "content-type": "application/json", "x-upsert": "true", "cache-control": "no-cache" }, body: JSON.stringify(data) });
+      if (!r.ok) throw new Error(`Couldn't save the calendar link (${r.status}).`);
+    },
+    del: async (team) => { await fetch(obj(team), { method: "DELETE", headers: h }); },
+    list: async () => {
+      const r = await fetch(`${base}/storage/v1/object/list/media`, { method: "POST", headers: { ...h, "content-type": "application/json" }, body: JSON.stringify({ prefix: "_sync/", limit: 200 }) });
+      return r.ok ? (await r.json()).map((f) => String(f.name || "").replace(/\.json$/, "")).filter(Boolean) : [];
+    },
+  };
+}
+
+// Synced games reuse the games.spond_id column (already unique) with an "ics:<team>:" prefix.
 export async function syncTeam(env, team) {
   const q = db(env), tz = env.SPOND_TIMEZONE || "America/Los_Angeles";
   const events = parseIcs(await fetchFeed(team.ics_url));
@@ -117,37 +139,54 @@ export async function syncTeam(env, team) {
   const today = new Date().toISOString().slice(0, 10);
   const prefix = `ics:${team.id}:`;
   const games = events.map((e) => ({ e, g: e.uid ? toGame(e, tz, team.name || "") : null })).filter((x) => x.g && x.g.date >= from);
-  const existing = await q(`games?team_id=eq.${enc(team.id)}&ext_id=like.${enc(prefix + "*")}&select=id,ext_id,status,date`);
-  const byId = Object.fromEntries(existing.map((g) => [g.ext_id, g]));
+  const existing = await q(`games?team_id=eq.${enc(team.id)}&spond_id=like.${enc(prefix + "*")}&select=id,spond_id,status,date`);
+  const byId = Object.fromEntries(existing.map((g) => [g.spond_id, g]));
   const seen = new Set();
   const live = [], dead = [];
   let added = 0, updated = 0, cancelled = 0;
   for (const { g } of games) {
-    const ext = prefix + g.spond_id; seen.add(ext);
+    const ext = (prefix + g.spond_id).slice(0, 300); seen.add(ext);
     const had = byId[ext];
     if (had && had.status === "final") continue;
-    const row = { team_id: team.id, ext_id: ext, date: g.date, time: g.time, opp: g.opp, home: g.home, loc: g.loc };
-    if (g.cancelled || g.postponed) { dead.push({ ...row, status: g.cancelled ? "cancelled" : "postponed" }); cancelled++; }
+    const row = { team_id: team.id, spond_id: ext, date: g.date, time: g.time, opp: g.opp, home: g.home, loc: g.loc };
+    if (g.cancelled || g.postponed) { dead.push({ ...row, status: g.cancelled ? "cancelled" : "postponed", had }); cancelled++; }
     else { live.push({ ...row, status: "scheduled" }); had ? updated++ : added++; }
   }
-  const upsert = (rows) => rows.length && q("games?on_conflict=ext_id", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(rows) });
-  await upsert(live); await upsert(dead);
+  const upsert = (rows) => rows.length && q("games?on_conflict=spond_id", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(rows) });
+  await upsert(live);
+  try { await upsert(dead.map(({ had, ...r }) => r)); }
+  catch { // Older databases don't allow a "cancelled" status yet: drop those games instead.
+    const ids = dead.filter((d) => d.had).map((d) => d.had.id);
+    if (ids.length) await q(`games?id=in.(${ids.map(enc).join(",")})`, { method: "DELETE" });
+  }
   // Upcoming games that were deleted in the other app come off the schedule too.
-  const gone = existing.filter((g) => !seen.has(g.ext_id) && g.status !== "final" && g.date >= today).map((g) => g.id);
+  const gone = existing.filter((g) => !seen.has(g.spond_id) && g.status !== "final" && g.date >= today).map((g) => g.id);
   if (gone.length) await q(`games?id=in.(${gone.map(enc).join(",")})`, { method: "DELETE" });
-  await q(`teams?id=eq.${enc(team.id)}`, { method: "PATCH", body: JSON.stringify({ ics_synced_at: new Date().toISOString() }) });
+  await store(env).put(team.id, { url: team.ics_url, source: sourceName(team.ics_url), synced_at: new Date().toISOString() });
   return { added, updated, removed: gone.length, cancelled, skipped: events.length - games.length };
 }
 
 // Runs on the 2-hour timer.
 export async function scheduled(env) {
   if (!env.SUPABASE_SERVICE_ROLE_KEY) return;
-  const q = db(env);
-  let links = [];
-  try { links = await q("team_sync?ics_url=not.is.null&select=team_id,ics_url"); } catch { return; } // 011 not run yet
-  if (!links.length) return;
-  const names = Object.fromEntries((await q(`teams?id=in.(${links.map((l) => enc(l.team_id)).join(",")})&select=id,name`)).map((t) => [t.id, t.name]));
-  for (const t of links.map((l) => ({ id: l.team_id, name: names[l.team_id] || "", ics_url: l.ics_url }))) { try { await syncTeam(env, t); } catch (e) { console.log("Calendar sync failed for", t.id, e.message); } }
+  const q = db(env), st = store(env);
+  const ids = await st.list();
+  for (const id of ids) {
+    try {
+      const cfg = await st.get(id); if (!cfg || !cfg.url) continue;
+      const name = ((await q(`teams?id=eq.${enc(id)}&select=name`))[0] || {}).name || "";
+      await syncTeam(env, { id, name, ics_url: cfg.url });
+    } catch (e) { console.log("Calendar sync failed for", id, e.message); }
+  }
+}
+
+// GET /api/calsync?team=<id>  -> {source, synced_at} for the schedule line (never the link itself).
+export async function onRequestGet({ request, env }) {
+  const team = new URL(request.url).searchParams.get("team") || "";
+  if (!/^[a-z0-9-]{1,60}$/.test(team) || !env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) return json({});
+  const cfg = await store(env).get(team);
+  return new Response(JSON.stringify(cfg && cfg.url ? { source: cfg.source || sourceName(cfg.url), synced_at: cfg.synced_at || null } : {}),
+    { headers: { "content-type": "application/json", "cache-control": "no-store" } });
 }
 
 // POST /api/calsync  {action: "set" | "sync", team_id, url?}
@@ -160,39 +199,31 @@ export async function onRequestPost({ request, env }) {
   if (!who.ok) return json({ error: "Your sign-in expired. Sign in again." }, 401);
   const caller = await who.json();
   let body; try { body = await request.json(); } catch { return json({ error: "Bad request." }, 400); }
-  const q = db(env), team_id = String(body.team_id || "");
+  const q = db(env), st = store(env), team_id = String(body.team_id || "");
   const sa = (await q(`site_admins?user_id=eq.${caller.id}&select=user_id`)).length > 0;
   const mem = await q(`memberships?user_id=eq.${caller.id}&team_id=eq.${enc(team_id)}&select=role`);
   const role = sa ? "admin" : (mem[0] && mem[0].role);
   if (!["admin", "coach", "scorekeeper"].includes(role)) return json({ error: "Only coaches and scorekeepers can do this." }, 403);
 
   try {
-    let team = (await q(`teams?id=eq.${enc(team_id)}&select=id,name`))[0];
+    const team = (await q(`teams?id=eq.${enc(team_id)}&select=id,name`))[0];
     if (!team) return json({ error: "Team not found." }, 404);
-    team.ics_url = ((await q(`team_sync?team_id=eq.${enc(team_id)}&select=ics_url`))[0] || {}).ics_url || null;
     if (body.action === "set") {
       if (!["admin", "coach"].includes(role)) return json({ error: "Only coaches and admins can connect a calendar." }, 403);
-      if (!body.url) {
-        await q(`team_sync?team_id=eq.${enc(team_id)}`, { method: "DELETE" });
-        await q(`teams?id=eq.${enc(team_id)}`, { method: "PATCH", body: JSON.stringify({ ics_source: null }) });
-        return json({ ok: true });
-      }
+      if (!body.url) { await st.del(team_id); return json({ ok: true }); }
       const url = cleanUrl(body.url);
       if (!url) return json({ error: "That doesn't look like a calendar link. It should start with https:// or webcal://." }, 400);
-      parseIcs(await fetchFeed(url)); // check it works before saving
-      await q("team_sync?on_conflict=team_id", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify([{ team_id, ics_url: url }]) });
-      await q(`teams?id=eq.${enc(team_id)}`, { method: "PATCH", body: JSON.stringify({ ics_source: sourceName(url) }) });
-      team = { ...team, ics_url: url };
-      return json({ ok: true, source: sourceName(url), result: await syncTeam(env, team) });
+      await fetchFeed(url); // check it works before saving
+      await st.put(team_id, { url, source: sourceName(url), synced_at: null });
+      return json({ ok: true, source: sourceName(url), result: await syncTeam(env, { ...team, ics_url: url }) });
     }
     if (body.action === "sync") {
-      if (!team.ics_url) return json({ error: "Connect a calendar link in Admin first." }, 400);
-      return json({ ok: true, result: await syncTeam(env, team) });
+      const cfg = await st.get(team_id);
+      if (!cfg || !cfg.url) return json({ error: "Connect a calendar link in Admin first." }, 400);
+      return json({ ok: true, result: await syncTeam(env, { ...team, ics_url: cfg.url }) });
     }
   } catch (e) {
-    const msg = String(e.message || "");
-    if (/team_sync|ics_|ext_id|column|relation/i.test(msg)) return json({ error: "Run supabase/011_calendar_sync.sql in Supabase first." }, 500);
-    return json({ error: msg || "Calendar sync failed." }, 502);
+    return json({ error: String(e.message || "") || "Calendar sync failed." }, 502);
   }
   return json({ error: "Unknown action." }, 400);
 }

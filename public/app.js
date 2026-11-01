@@ -64,10 +64,12 @@ function logoUrl(t){
   return `/logos/${t.id}.jpg`;
 }
 async function loadTeamData(){
-  const [p,g,l]=await Promise.all([
+  const [p,g,l,ic]=await Promise.all([
     sb.from("players").select("*").eq("team_id",TEAM.id),
     sb.from("games").select("*").eq("team_id",TEAM.id),
-    sb.from("game_lines").select("game_id,bat,pit,fld").eq("team_id",TEAM.id)]);
+    sb.from("game_lines").select("game_id,bat,pit,fld").eq("team_id",TEAM.id),
+    fetch(`/api/calsync?team=${encodeURIComponent(TEAM.id)}`).then(r=>r.json()).catch(()=>({}))]);
+  TEAM.ics_source=ic&&ic.source||null;TEAM.ics_synced_at=ic&&ic.synced_at||null;
   const err=p.error||g.error||l.error; if(err)throw err;
   S={team:{name:TEAM.name,season:TEAM.season,league:TEAM.league,innings:TEAM.innings||6,pitchMax:TEAM.pitch_max||85},
      players:p.data, games:g.data.filter(x=>(x.kind||"game")==="game"), events:g.data.filter(x=>x.kind==="event"), lines:{}};
