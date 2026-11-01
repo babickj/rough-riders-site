@@ -11,7 +11,7 @@ const sb=configured?window.supabase.createClient(CFG.supabaseUrl,CFG.supabaseAno
 
 let S=null, TEAM=null, teams=[], session=null, role=null, siteAdmin=false, canEdit=false, isAdmin=false, isCoach=false, aiEnabled=false, aiMulti=false;
 const me={id:null,email:"",name:""};
-let curLineup=null, pendingEnter=null, pendingData=null, myTeams=[];
+let curLineup=null, pendingEnter=null, pendingData=null, myTeams=[], myAdminTeams=[];
 
 const BAT=[["ab","AB"],["r","R"],["h","H"],["d","2B"],["t","3B"],["hr","HR"],["rbi","RBI"],["bb","BB"],["so","K"],["hbp","HBP"],["sb","SB"]];
 const PIT=[["ip","IP"],["pc","Pitches"],["h","H"],["r","R"],["er","ER"],["bb","BB"],["so","K"]];
@@ -115,7 +115,7 @@ const blobToB64=b=>new Promise(r=>{const fr=new FileReader();fr.onload=()=>r(Str
 
 // ---------- auth ----------
 async function refreshRole(){
-  role=null;siteAdmin=false;me.id=null;me.email="";me.name="";myTeams=[];
+  role=null;siteAdmin=false;me.id=null;me.email="";me.name="";myTeams=[];myAdminTeams=[];
   if(session){
     me.id=session.user.id;me.email=session.user.email||"";me.name=session.user.user_metadata?.name||"";
     try{
@@ -124,8 +124,8 @@ async function refreshRole(){
         sb.from("site_admins").select("user_id").eq("user_id",me.id)]);
       role=m.data?.[0]?.role||null; if(m.data?.[0]?.display_name)me.name=m.data[0].display_name;
       siteAdmin=!!sa.data?.length; if(siteAdmin)role="admin";
-      if(siteAdmin)myTeams=teams.map(t=>t.id);
-      else{const all=await sb.from("memberships").select("team_id").eq("user_id",me.id);myTeams=(all.data||[]).map(x=>x.team_id);}
+      if(siteAdmin){myTeams=teams.map(t=>t.id);myAdminTeams=myTeams.slice();}
+      else{const all=await sb.from("memberships").select("team_id,role").eq("user_id",me.id);myTeams=(all.data||[]).map(x=>x.team_id);myAdminTeams=(all.data||[]).filter(x=>x.role==="admin").map(x=>x.team_id);}
     }catch(e){}
   }
   isAdmin=role==="admin"; isCoach=isAdmin||role==="coach"; canEdit=isCoach||role==="scorekeeper";
@@ -705,7 +705,7 @@ async function renderAdmin(){
   }catch(e){setStatus(st,errText(e),"err");}
   $("#ad-teams").hidden=!siteAdmin;
   if(siteAdmin){$("#ad-teamlist").innerHTML=`<div class="tbl-wrap"><table class="members"><tbody>${teams.map(t=>`<tr><td class="l"><b>${esc(t.name)}</b>${t.id===TEAM.id?" (this team)":""}</td><td class="l"><a href="${teamLink(t.id)}">${esc(teamUrl(t.id))}</a></td></tr>`).join("")}</tbody></table></div>`;$("#nt-preview").textContent=location.origin+"/web-name";}
-  $("#ad-all-wrap").hidden=!(siteAdmin&&teams.length>1);
+  const also=alsoBoxes("add");$("#ad-also").innerHTML=also;$("#ad-also").hidden=!also;
   try{
     const log=await q(sb.from("activity").select("*").eq("team_id",TEAM.id).order("at",{ascending:false}).limit(25));
     $("#ad-log").innerHTML=log.length?`<thead><tr><th class="l">When</th><th class="l">Who</th><th class="l">Change</th></tr></thead><tbody>${log.map(l=>`<tr><td class="l">${esc(new Date(l.at).toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}))}</td><td class="l">${esc(l.by_name||"Someone")}</td><td class="l">${esc(l.what)}</td></tr>`).join("")}</tbody>`:"";
@@ -732,9 +732,8 @@ $("#ad-add").onclick=async()=>{
   if(!email){setStatus(st,"Enter their email.","err");return;}
   setStatus(st,"Adding…");
   try{const res=await api("/api/admin",{action:"add",team_id:TEAM.id,name,email,role:r,password:pw});
-    if(siteAdmin&&$("#ad-all").checked)for(const t of teams)if(t.id!==TEAM.id)await api("/api/admin",{action:"add",team_id:t.id,name,email,role:r,password:pw});
-    const where=siteAdmin&&$("#ad-all").checked?" to every team":"";
-    setStatus(st,res.created?`Added ${name||email}${where}.`:`Added ${name||email}${where}. They already had an account, so their password didn't change.`,"ok");$("#ad-all").checked=false;
+    const more=await addToTeams(alsoChecked("add"),{name,email,role:r,password:pw});
+    setStatus(st,(res.created?`Added ${name||email}.`:`Added ${name||email}. They already had an account, so their password didn't change.`)+more,"ok");$$('[data-also="add"]').forEach(x=>x.checked=false);
     if(res.created)showPw(name||email,pw);
     $("#ad-name").value="";$("#ad-email").value="";logAct(`Added ${name||email} as ${r}`);renderAdmin();}
   catch(e){setStatus(st,e.message,"err");}
@@ -796,6 +795,14 @@ $("#rq-form").addEventListener("submit",async e=>{
   $("#rq-form").reset();setStatus(st,`Request sent. The ${S.team.name} admin will send you a login.`,"ok");
 });
 let requests=[];
+// Other teams this admin can add people to, grouped by school so squads sit together.
+const otherAdminTeams=()=>teams.filter(t=>t.id!==TEAM.id&&myAdminTeams.includes(t.id)).sort((a,b)=>String(a.school||"~").localeCompare(String(b.school||"~"))||a.name.localeCompare(b.name));
+const alsoBoxes=(key,checked=[])=>{const ts=otherAdminTeams();return ts.length?`<div class="also"><span class="f-label">Also add to</span>${ts.map(t=>`<label><input type="checkbox" data-also="${key}" value="${t.id}" ${checked.includes(t.id)?"checked":""}>${esc(t.name)}</label>`).join("")}</div>`:"";};
+const alsoChecked=key=>$$(`[data-also="${key}"]:checked`).map(x=>x.value);
+async function addToTeams(ids,person){const done=[],failed=[];for(const id of ids){try{await api("/api/admin",{action:"add",team_id:id,...person});done.push(id);}catch(e){failed.push(id);}}
+  if(done.length)try{await sb.from("access_requests").update({status:"approved"}).eq("email",person.email.toLowerCase()).eq("status","pending").in("team_id",done);}catch(e){}
+  const nm=id=>(teams.find(t=>t.id===id)||{}).name||id;
+  return (done.length?` Also added to ${done.map(nm).join(", ")}.`:"")+(failed.length?` Couldn't add to ${failed.map(nm).join(", ")} (you need to be an admin there).`:"");}
 async function loadRequests(){
   if(!isAdmin)return;
   const {data,error}=await sb.from("access_requests").select("*").eq("team_id",TEAM.id).eq("status","pending").order("created_at");
@@ -803,7 +810,10 @@ async function loadRequests(){
   const a=$('nav.tabs a[data-v="admin"]');if(a)a.textContent=requests.length?`Admin (${requests.length})`:"Admin";
   const list=$("#rq-list");if(!list)return;
   if(error){list.innerHTML=`<p class="note">Requests aren't set up yet. Run supabase/003_access_requests.sql in Supabase.</p>`;return;}
-  list.innerHTML=requests.length?`<div class="tbl-wrap"><table class="members"><thead><tr><th class="l">Name</th><th class="l">Email</th><th class="l">Player</th><th class="l">Role</th><th class="l"></th></tr></thead><tbody>${requests.map(r=>`<tr><td class="l">${esc(r.name)}${r.note?`<div class="note">${esc(r.note)}</div>`:""}</td><td class="l">${esc(r.email)}</td><td class="l">${esc(r.player)}</td><td class="l"><select data-rqrole="${r.id}" aria-label="Role for ${esc(r.name)}">${["coach","scorekeeper","admin","parent"].map(x=>`<option value="${x}" ${r.role===x?"selected":""}>${ROLE_LABEL[x]}</option>`).join("")}</select></td><td class="l"><button class="linkbtn" data-rqok="${r.id}">Approve</button> · <button class="linkbtn" data-rqno="${r.id}">Decline</button></td></tr>`).join("")}</tbody></table></div>`:`<p class="note">No requests waiting. Visitors can ask for a login from the Sign in page.</p>`;
+  let elsewhere={};
+  if(requests.length&&otherAdminTeams().length){const r2=await sb.from("access_requests").select("email,team_id").in("email",requests.map(r=>r.email)).eq("status","pending").neq("team_id",TEAM.id);
+    for(const x of r2.data||[])(elsewhere[x.email]=elsewhere[x.email]||[]).push(x.team_id);}
+  list.innerHTML=requests.length?`<div class="tbl-wrap"><table class="members"><thead><tr><th class="l">Name</th><th class="l">Email</th><th class="l">Player</th><th class="l">Role</th><th class="l"></th></tr></thead><tbody>${requests.map(r=>`<tr><td class="l">${esc(r.name)}${r.note?`<div class="note">${esc(r.note)}</div>`:""}</td><td class="l">${esc(r.email)}</td><td class="l">${esc(r.player)}</td><td class="l"><select data-rqrole="${r.id}" aria-label="Role for ${esc(r.name)}">${["coach","scorekeeper","admin","parent"].map(x=>`<option value="${x}" ${r.role===x?"selected":""}>${ROLE_LABEL[x]}</option>`).join("")}</select>${alsoBoxes("rq-"+r.id,elsewhere[r.email]||[])}${(elsewhere[r.email]||[]).length?`<div class="note">Also asked to join the checked team${elsewhere[r.email].length>1?"s":""}.</div>`:""}</td><td class="l"><button class="linkbtn" data-rqok="${r.id}">Approve</button> · <button class="linkbtn" data-rqno="${r.id}">Decline</button></td></tr>`).join("")}</tbody></table></div>`:`<p class="note">No requests waiting. Visitors can ask for a login from the Sign in page.</p>`;
 }
 $("#rq-list").addEventListener("click",async e=>{
   const b=e.target.closest("[data-rqok],[data-rqno]");if(!b)return;const st=$("#rq-astatus");
@@ -813,7 +823,8 @@ $("#rq-list").addEventListener("click",async e=>{
       const role=$(`[data-rqrole="${r.id}"]`).value,pw=genPw();setStatus(st,"Creating their login…");
       const res=await api("/api/admin",{action:"add",team_id:TEAM.id,name:r.name,email:r.email,role,password:pw});
       await q(sb.from("access_requests").update({status:"approved"}).eq("id",r.id));
-      setStatus(st,res.created?`Approved ${r.name}.`:`Approved ${r.name}. They already had a login, so their password didn't change.`,"ok");
+      const more=await addToTeams(alsoChecked("rq-"+r.id),{name:r.name,email:r.email,role,password:pw});
+      setStatus(st,(res.created?`Approved ${r.name}.`:`Approved ${r.name}. They already had a login, so their password didn't change.`)+more,"ok");
       if(res.created)showPw(`${r.name} (${r.email})`,pw);
       logAct(`Approved access for ${r.name} as ${role}`);renderAdmin();
     }else{

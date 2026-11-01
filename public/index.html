@@ -346,9 +346,10 @@
         <label class="f">Name<input type="text" id="ad-name"></label>
         <label class="f">Email<input type="email" id="ad-email"></label>
         <label class="f">Role<select id="ad-role"><option value="coach">Coach</option><option value="scorekeeper">Scorekeeper</option><option value="admin">Admin</option><option value="parent">Parent (team photos only)</option></select></label>
-        <label class="row" id="ad-all-wrap" hidden style="gap:6px;align-self:center"><input type="checkbox" id="ad-all" style="width:18px;height:18px;accent-color:var(--red)"> Add to every team</label>
+
         <button class="primary" type="button" id="ad-add">Add person</button>
       </div>
+      <div id="ad-also" class="also" hidden></div>
       <p class="note">New accounts get a temporary password you can pass along. They can change it under My account. If the person already has an account from the other team, they keep their current password.</p>
       <span class="status" id="ad-astatus"></span>
     </div>
