@@ -1,5 +1,5 @@
 // Team admin API: add people, change roles, reset passwords, remove people, create teams.
-// Runs on Cloudflare Pages Functions. Needs these environment variables (Pages > Settings > Variables):
+// Runs in the Cloudflare Worker (see worker.js). Needs these variables (Worker > Settings > Variables and Secrets):
 //   SUPABASE_URL               https://<project>.supabase.co
 //   SUPABASE_SERVICE_ROLE_KEY  the service_role key (keep secret; set as an encrypted variable)
 

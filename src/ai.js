@@ -1,5 +1,5 @@
 // Reads a scoresheet photo or pasted Spond text with Claude.
-// Optional. Needs these environment variables (Pages > Settings > Variables):
+// Optional. Needs these variables (Worker > Settings > Variables and Secrets):
 //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY   (to check the caller is team staff)
 //   ANTHROPIC_API_KEY                         (from console.anthropic.com; set as an encrypted variable)
 //   CLAUDE_MODEL                              (optional; defaults below)

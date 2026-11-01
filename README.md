@@ -1,17 +1,18 @@
 # Rough Riders team site
 
 Schedule, live scoring, stats, lineups, printable scoresheets, photos and videos for youth baseball teams.
-Static site on Cloudflare Pages, data and logins in Supabase.
+Static site and a small Worker on Cloudflare, data and logins in Supabase.
 
 ## What's where
 
-- `index.html`, `app.css`, `app.js`: the site
-- `config.js`: your Supabase address and public key
-- `functions/api/admin.js`: adding people, roles, password resets (runs on Cloudflare)
-- `functions/api/ai.js`: optional scoresheet photo and Spond reading with Claude
+- `public/`: the site (`index.html`, `app.css`, `app.js`, `config.js`, `logos/`)
+- `public/config.js`: your Supabase address and public key
+- `worker.js` and `wrangler.jsonc`: the Cloudflare Worker that serves the site and the `/api` routes
+- `src/admin.js`: adding people, roles, password resets
+- `src/ai.js`: optional scoresheet photo and Spond reading with Claude
 - `supabase/schema.sql`: database tables and access rules
 - `supabase/seed.sql`: creates the team and makes you the owner
-- `logos/rough-riders.jpg`: team logo (a second team's logo goes in `logos/<team-web-name>.jpg`, or upload it in Admin)
+- `public/logos/rough-riders.jpg`: team logo (a second team's logo goes in `public/logos/<team-web-name>.jpg`, or upload it in Admin)
 
 ## Who can do what
 
@@ -30,19 +31,19 @@ Static site on Cloudflare Pages, data and logins in Supabase.
 5. In **Project Settings > API**, copy the **Project URL**, the **anon public** key, and the **service_role** key (keep this one secret).
 
 ### 2. config.js
-Paste the Project URL and anon key into `config.js` and commit it. Both are safe to publish.
+Paste the Project URL and anon key into `public/config.js` and commit it. Both are safe to publish.
 
-### 3. Cloudflare Pages
-1. **Workers & Pages > Create > Pages > Connect to Git**, pick this repository.
-2. Build settings: Framework **None**, build command blank, output directory `/`.
-3. **Settings > Variables and Secrets**, add (type **Secret** for the keys):
-   - `SUPABASE_URL` = Project URL
-   - `SUPABASE_SERVICE_ROLE_KEY` = service_role key
-   - `ANTHROPIC_API_KEY` = optional, turns on scoresheet photo and Spond reading
-4. Redeploy. The site is live at `https://<project>.pages.dev`.
+### 3. Cloudflare Worker
+1. **Workers & Pages > Create > Import a repository**, pick this repository. Leave the build and deploy commands as they are (`npx wrangler deploy`).
+2. The Worker's name must match `name` in `wrangler.jsonc` (`rough-riders-site`).
+3. In the Worker, **Settings > Variables and Secrets**, add:
+   - `SUPABASE_URL` = Project URL (type Text)
+   - `SUPABASE_SERVICE_ROLE_KEY` = service_role key (type Secret)
+   - `ANTHROPIC_API_KEY` = optional, turns on scoresheet photo and Spond reading (type Secret)
+4. Every push to `main` redeploys. The site is live at `https://rough-riders-site.<your-subdomain>.workers.dev`.
 
 ### Later: your own web address
-In the Pages project, **Custom domains > Set up a domain**. For one address per team, add each one and map it in `config.js`:
+In the Worker, **Settings > Domains & Routes > Add > Custom domain**. For one address per team, add each one and map it in `config.js`:
 ```js
 hostTeams: { "riders.example.com": "rough-riders", "team2.example.com": "team-two" }
 ```
