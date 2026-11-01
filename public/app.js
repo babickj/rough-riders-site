@@ -70,6 +70,8 @@ async function loadTeamData(){
   S={team:{name:TEAM.name,season:TEAM.season,league:TEAM.league,innings:TEAM.innings||6,pitchMax:TEAM.pitch_max||85},
      players:p.data, games:g.data, lines:{}};
   for(const r of l.data)S.lines[r.game_id]={bat:r.bat||{},pit:r.pit||{},fld:r.fld||{}};
+  const o=await sb.from("player_games").select("*").eq("team_id",TEAM.id).order("date");
+  S.outside=o.error?[]:o.data; S.outsideReady=!o.error;
 }
 const gameRow=g=>({id:g.id,team_id:TEAM.id,date:g.date,time:g.time||"",opp:g.opp,home:!!g.home,loc:g.loc||"",status:g.status||"scheduled",us:g.us,them:g.them,lineup:g.lineup||null});
 async function q(p){const {data,error}=await p;if(error)throw error;return data;}
@@ -262,11 +264,10 @@ function renderStats(){
 function restDays(pc){for(const [p,d] of restTiers())if(pc>=p)return d;return 0;}
 function renderAvail(){
   $("#rest-note").textContent=restNote();
-  const last={};
-  for(const g of [...S.games].sort((a,b)=>a.date.localeCompare(b.date))){const L=S.lines[g.id];if(!L)continue;for(const [pid,p] of Object.entries(L.pit||{}))last[pid]={date:g.date,pc:+p.pc||0};}
+  const last={};for(const p of S.players){const l=lastOuting(p.id);if(l)last[p.id]=l;}
   const t=new Date(today()+"T12:00");
   $("#avail").innerHTML=sortedPlayers().filter(p=>last[p.id]).map(p=>{const l=last[p.id],need=restDays(l.pc),d=new Date(l.date+"T12:00"),free=new Date(d);free.setDate(d.getDate()+need+1);const ok=t>=free;
-    return `<div class="av"><div><b>#${p.num} ${plink(p)}</b><div class="s">${l.pc} pitches on ${dParts(l.date).m} ${dParts(l.date).d}</div></div><span class="chip ${ok?"ok":"rest"}">${ok?"Available":"Rest until "+MON[free.getMonth()]+" "+free.getDate()}</span></div>`}).join("")||`<p class="note">No pitching outings yet.</p>`;
+    return `<div class="av"><div><b>#${p.num} ${plink(p)}</b><div class="s">${l.pc} pitches on ${dParts(l.date).m} ${dParts(l.date).d}${l.outside?" (outside game)":""}</div></div><span class="chip ${ok?"ok":"rest"}">${ok?"Available":"Rest until "+MON[free.getMonth()]+" "+free.getDate()}</span></div>`}).join("")||`<p class="note">No pitching outings yet.</p>`;
 }
 
 // ---------- roster ----------
@@ -456,33 +457,162 @@ $("#tag-save").onclick=async()=>{
 let curPlayer=null,curView=null;
 const TOPICS={general:"General",hitting:"Hitting",pitching:"Pitching",fielding:"Fielding",baserunning:"Baserunning",effort:"Effort and attitude"};
 const plink=p=>`<a class="pl" href="#player-${p.id}">${esc(p.name)}</a>`;
+// Every game line for one player: team games plus games played outside the team.
+function playerLines(pid,incOut){
+  const out=[];
+  for(const g of S.games){const L=S.lines[g.id];if(!L)continue;const b=(L.bat||{})[pid],q_=(L.pit||{})[pid],f=(L.fld||{})[pid];
+    if(b||q_||f)out.push({kind:"team",date:g.date,label:`${g.home?"vs":"at"} ${g.opp}`,res:g.us!=null?`${g.us>g.them?"W":g.us<g.them?"L":"T"} ${g.us}–${g.them}`:"",bat:b,pit:q_,fld:f});}
+  if(incOut)for(const o of S.outside||[])if(o.player_id===pid)out.push({kind:"outside",id:o.id,date:o.date,label:o.event,res:"",bat:o.bat,pit:o.pit,fld:o.fld});
+  return out.sort((a,b)=>a.date.localeCompare(b.date));
+}
+function lastOuting(pid){let l=null;for(const r of playerLines(pid,true))if(r.pit&&(+r.pit.pc||0)>0&&(!l||r.date>=l.date))l={date:r.date,pc:+r.pit.pc||0,outside:r.kind==="outside"};return l;}
+function aggBat(rows){const x={g:0};for(const r of rows)if(r.bat){x.g++;for(const [k] of BAT)x[k]=(x[k]||0)+(+r.bat[k]||0);}if(!x.g)return null;const tb=x.h+x.d+2*x.t+3*x.hr,pa=x.ab+x.bb+x.hbp;Object.assign(x,{pa,avg:x.ab?x.h/x.ab:NaN,obp:pa?(x.h+x.bb+x.hbp)/pa:NaN,slg:x.ab?tb/x.ab:NaN});x.ops=x.obp+x.slg;return x;}
+function aggPit(rows){const x={g:0,outs:0,pc:0,h:0,r:0,er:0,bb:0,so:0};for(const r of rows)if(r.pit){x.g++;x.outs+=+r.pit.outs||0;for(const k of ["pc","h","r","er","bb","so"])x[k]+=+r.pit[k]||0;}if(!x.g)return null;const ip=x.outs/3;Object.assign(x,{era:ip?x.er*inn()/ip:NaN,whip:ip?(x.bb+x.h)/ip:NaN});return x;}
+function aggFld(rows){const x={g:0,po:0,a:0,e:0};for(const r of rows)if(r.fld){x.g++;for(const k of ["po","a","e"])x[k]+=+r.fld[k]||0;}if(!x.g)return null;x.tc=x.po+x.a+x.e;x.pct=x.tc?(x.po+x.a)/x.tc:NaN;return x;}
+
+// ---- small trend charts (single series; hollow marks = outside games) ----
+const fmtDay=d=>{const [y,m,dd]=d.split("-");return `${MON[+m-1]} ${+dd}`;};
+function niceTicks(lo,hi,n=3){if(lo===hi){lo-=1;hi+=1;}const span=hi-lo,raw=span/n,mag=Math.pow(10,Math.floor(Math.log10(raw))),step=[1,2,2.5,5,10].map(s=>s*mag).find(s=>span/s<=n)||raw;const a=Math.floor(lo/step)*step,b=Math.ceil(hi/step)*step,t=[];for(let v=a;v<=b+step/2;v+=step)t.push(+v.toFixed(6));return t;}
+function trendCard({title,big,sub,pts,yfmt,bars,refY,refLabel,yMin,foot}){
+  const W=320,H=130,L=36,R=10,T=10,B=22,iw=W-L-R,ih=H-T-B;
+  const ys=pts.map(p=>p.y).concat(refY!=null?[refY]:[]);let lo=yMin!=null?yMin:Math.min(...ys),hi=Math.max(...ys);
+  if(yMin==null){const pad=(hi-lo)*.15||Math.abs(hi)*.05||1;lo-=pad;hi+=pad;}
+  const ticks=niceTicks(lo,hi);lo=ticks[0];hi=ticks[ticks.length-1];
+  const sy=v=>T+ih-(v-lo)/(hi-lo)*ih;
+  const ts=pts.map(p=>new Date(p.date+"T12:00").getTime()),t0=Math.min(...ts),t1=Math.max(...ts);
+  const n=pts.length,band=iw/Math.max(n,1),bw=Math.min(24,band*.6);
+  const sx=bars?(i=>L+band*i+band/2):(i=>t1===t0?L+iw/2:L+(ts[i]-t0)/(t1-t0)*iw);
+  let g=ticks.map(v=>`<line class="grid" x1="${L}" x2="${W-R}" y1="${sy(v)}" y2="${sy(v)}"/><text x="${L-6}" y="${sy(v)+4}" text-anchor="end">${yfmt(v,true)}</text>`).join("");
+  if(refY!=null)g+=`<line class="ref" x1="${L}" x2="${W-R}" y1="${sy(refY)}" y2="${sy(refY)}"/><text x="${W-R}" y="${sy(refY)-4}" text-anchor="end">${esc(refLabel||"")}</text>`;
+  g+=`<text x="${L}" y="${H-4}">${fmtDay(pts[0].date)}</text>${n>1?`<text x="${W-R}" y="${H-4}" text-anchor="end">${fmtDay(pts[n-1].date)}</text>`:""}`;
+  let m="";
+  if(bars){m=pts.map((p,i)=>{const x=sx(i)-bw/2,y=sy(p.y),h=Math.max(0,sy(lo)-y),r=Math.min(4,h,bw/2);return `<path class="bar${p.hollow?" hollow":""}" d="M${x},${y+h}V${y+r}Q${x},${y} ${x+r},${y}H${x+bw-r}Q${x+bw},${y} ${x+bw},${y+r}V${y+h}Z"/>`;}).join("");}
+  else{const d=pts.map((p,i)=>`${i?"L":"M"}${sx(i).toFixed(1)},${sy(p.y).toFixed(1)}`).join("");
+    if(n>1)m+=`<path class="area" d="${d}L${sx(n-1)},${sy(lo)}L${sx(0)},${sy(lo)}Z"/><path class="ln" d="${d}"/>`;
+    m+=pts.map((p,i)=>`<circle class="dot${p.hollow?" hollow":""}" cx="${sx(i)}" cy="${sy(p.y)}" r="${n>12&&!p.hollow?3:4}"/>`).join("");}
+  const id="tr"+Math.random().toString(36).slice(2,8);
+  trendData[id]={pts,xs:pts.map((_,i)=>sx(i)),ys:pts.map(p=>sy(p.y)),W};
+  return `<div class="trend" data-trend="${id}"><h4>${esc(title)}</h4><div class="big">${big}${sub?`<small>${sub}</small>`:""}</div><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(title)} over time">${g}${m}</svg><div class="tip" hidden></div>${foot?`<div class="key">${foot}</div>`:""}</div>`;
+}
+const trendData={};
+function onTrendMove(e){
+  const card=e.target.closest(".trend");if(!card)return;const d=trendData[card.dataset.trend];if(!d)return;
+  const svg=card.querySelector("svg"),r=svg.getBoundingClientRect(),k=r.width/d.W,x=(e.clientX-r.left)/k;
+  let best=0;d.xs.forEach((v,i)=>{if(Math.abs(v-x)<Math.abs(d.xs[best]-x))best=i;});
+  const tip=card.querySelector(".tip"),cr=card.getBoundingClientRect();tip.hidden=false;tip.textContent=d.pts[best].tip;
+  tip.style.left=(r.left-cr.left+d.xs[best]*k)+"px";tip.style.top=(r.top-cr.top+d.ys[best]*k)+"px";
+}
+for(const id of ["#pl-trends","#pl-metrics"]){$(id).addEventListener("pointermove",onTrendMove);$(id).addEventListener("pointerleave",()=>$$(id+" .tip").forEach(t=>t.hidden=true));}
+
 function renderPlayer(pid){
   const p=S.players.find(x=>x.id===pid);
-  if(!p){$("#pl-name").textContent="Player not found";$("#pl-num").textContent="";$("#pl-stats").innerHTML="";$("#pl-log").innerHTML="";return;}
+  if(!p){$("#pl-name").textContent="Player not found";$("#pl-num").textContent="";$("#pl-stats").innerHTML="";$("#pl-log").innerHTML="";$("#pl-trends").innerHTML="";return;}
   document.title=`${p.name} · ${S.team.name}`;
   $("#pl-num").textContent=p.num;$("#pl-name").textContent=p.name;
-  const B=batTotals("")[pid],P=pitTotals("")[pid];
-  const F=(()=>{const x={g:0,po:0,a:0,e:0};for(const L of Object.values(S.lines)){const f=(L.fld||{})[pid];if(f){x.g++;x.po+=+f.po||0;x.a+=+f.a||0;x.e+=+f.e||0;}}x.tc=x.po+x.a+x.e;x.pct=x.tc?(x.po+x.a)/x.tc:NaN;return x;})();
-  const last=(()=>{let l=null;for(const g of [...S.games].sort((a,b)=>a.date.localeCompare(b.date))){const q_=((S.lines[g.id]||{}).pit||{})[pid];if(q_)l={date:g.date,pc:+q_.pc||0};}return l;})();
+  const hasOut=(S.outside||[]).some(o=>o.player_id===pid);
+  $("#pl-scope").hidden=!hasOut;
+  const inc=!hasOut||$("#pl-outside").checked, rows=playerLines(pid,inc);
+  const B=aggBat(rows),P=aggPit(rows),F=aggFld(rows),last=lastOuting(pid);
   let rest="";if(last){const need=restDays(last.pc),d=new Date(last.date+"T12:00"),free=new Date(d);free.setDate(d.getDate()+need+1);const ok=new Date(today()+"T12:00")>=free;rest=`<span class="chip ${ok?"ok":"rest"}">${ok?"Available to pitch":"Rest until "+MON[free.getMonth()]+" "+free.getDate()}</span>`;}
   $("#pl-sub").innerHTML=[S.team.name,S.team.season].filter(Boolean).map(esc).join(" · ")+(rest?" "+rest:"");
   const tbl=(cols,row)=>`<div class="tbl-wrap"><table><thead><tr>${cols.map(([,l])=>`<th style="cursor:default">${l}</th>`).join("")}</tr></thead><tbody><tr>${cols.map(([k,,f])=>`<td>${f?f(row[k],row):row[k]}</td>`).join("")}</tr></tbody></table></div>`;
   let html="";
   html+=B?`<div><h3 style="margin-bottom:6px">Batting</h3>${tbl([["g","G"],["pa","PA"],...BAT,["avg","AVG",fmt3],["obp","OBP",fmt3],["slg","SLG",fmt3],["ops","OPS",fmt3]],B)}</div>`:`<p class="note">No at-bats yet.</p>`;
   if(P)html+=`<div><h3 style="margin-bottom:6px">Pitching</h3>${tbl([["g","G"],["outs","IP",v=>outsToIp(v)],["pc","Pitches"],["h","H"],["r","R"],["er","ER"],["bb","BB"],["so","K"],["era","ERA",fmt2],["whip","WHIP",fmt2]],P)}</div>`;
-  if(F.g)html+=`<div><h3 style="margin-bottom:6px">Fielding</h3>${tbl([["g","G"],["po","PO"],["a","A"],["e","E"],["tc","TC"],["pct","FLD%",fmt3]],F)}</div>`;
+  if(F)html+=`<div><h3 style="margin-bottom:6px">Fielding</h3>${tbl([["g","G"],["po","PO"],["a","A"],["e","E"],["tc","TC"],["pct","FLD%",fmt3]],F)}</div>`;
   $("#pl-stats").innerHTML=html;
-  const games=[...S.games].filter(g=>{const L=S.lines[g.id];return L&&((L.bat||{})[pid]||(L.pit||{})[pid]||(L.fld||{})[pid]);}).sort((a,b)=>b.date.localeCompare(a.date));
-  $("#pl-log").innerHTML=games.length?`<thead><tr><th class="l" style="cursor:default">Game</th><th style="cursor:default">Result</th><th style="cursor:default">Batting</th><th style="cursor:default">Pitching</th><th style="cursor:default">Fielding</th></tr></thead><tbody>`+games.map(g=>{
-    const L=S.lines[g.id],b=(L.bat||{})[pid],q_=(L.pit||{})[pid],f=(L.fld||{})[pid];
-    const bs=b?[`${b.h}-${b.ab}`,b.d?`${b.d} 2B`:"",b.t?`${b.t} 3B`:"",b.hr?`${b.hr} HR`:"",b.rbi?`${b.rbi} RBI`:"",b.r?`${b.r} R`:"",b.bb?`${b.bb} BB`:"",b.so?`${b.so} K`:"",b.sb?`${b.sb} SB`:""].filter(Boolean).join(", "):"";
+  // trends
+  const outKey=rows.some(r=>r.kind==="outside")?"Hollow marks are games outside the team.":"";
+  const cards=[];let h=0,ab=0,ob=0,pa=0;const avgPts=[],obpPts=[];
+  for(const r of rows){if(!r.bat)continue;h+=+r.bat.h||0;ab+=+r.bat.ab||0;ob+=(+r.bat.h||0)+(+r.bat.bb||0)+(+r.bat.hbp||0);pa+=(+r.bat.ab||0)+(+r.bat.bb||0)+(+r.bat.hbp||0);
+    const tip=`${fmtDay(r.date)} ${r.label}: ${r.bat.h||0}-${r.bat.ab||0}`;
+    if(ab)avgPts.push({date:r.date,y:h/ab,hollow:r.kind==="outside",tip:`${tip} · AVG ${fmt3(h/ab)}`});
+    if(pa)obpPts.push({date:r.date,y:ob/pa,hollow:r.kind==="outside",tip:`${tip} · OBP ${fmt3(ob/pa)}`});}
+  const r3=(v,t)=>t?(v===0?"0":fmt3(v)):fmt3(v);
+  if(avgPts.length>=2)cards.push(trendCard({title:"Batting average",big:fmt3(avgPts.at(-1).y),sub:`after ${avgPts.length} games`,pts:avgPts,yfmt:r3,yMin:0,foot:outKey}));
+  if(obpPts.length>=2)cards.push(trendCard({title:"On-base percentage",big:fmt3(obpPts.at(-1).y),sub:`after ${obpPts.length} games`,pts:obpPts,yfmt:r3,yMin:0,foot:outKey}));
+  const pcPts=rows.filter(r=>r.pit&&+r.pit.pc).map(r=>({date:r.date,y:+r.pit.pc,hollow:r.kind==="outside",tip:`${fmtDay(r.date)} ${r.label}: ${r.pit.pc} pitches, ${outsToIp(+r.pit.outs||0)} IP, ${r.pit.so||0} K`})).slice(-12);
+  if(pcPts.length)cards.push(trendCard({title:"Pitches per outing",big:String(pcPts.at(-1).y),sub:"last outing",pts:pcPts,yfmt:v=>String(Math.round(v)),bars:true,yMin:0,refY:S.team.pitchMax,refLabel:`${S.team.pitchMax} limit`,foot:outKey}));
+  $("#pl-trends").innerHTML=cards.join("")||`<p class="note">Trends appear after two games with at-bats, or after the first pitching outing.</p>`;
+  // game log
+  const canDel=canEdit;
+  $("#pl-log").innerHTML=rows.length?`<thead><tr><th class="l" style="cursor:default">Game</th><th style="cursor:default">Result</th><th style="cursor:default">Batting</th><th style="cursor:default">Pitching</th><th style="cursor:default">Fielding</th>${canDel?"<th></th>":""}</tr></thead><tbody>`+[...rows].reverse().map(r=>{
+    const b=r.bat,q_=r.pit,f=r.fld;
+    const bs=b?[`${b.h||0}-${b.ab||0}`,b.d?`${b.d} 2B`:"",b.t?`${b.t} 3B`:"",b.hr?`${b.hr} HR`:"",b.rbi?`${b.rbi} RBI`:"",b.r?`${b.r} R`:"",b.bb?`${b.bb} BB`:"",b.so?`${b.so} K`:"",b.sb?`${b.sb} SB`:""].filter(Boolean).join(", "):"";
     const ps=q_?`${outsToIp(q_.outs||0)} IP, ${q_.pc||0} P, ${q_.so||0} K, ${q_.er||0} ER`:"";
     const fs=f?`${f.po||0} PO, ${f.a||0} A${f.e?`, ${f.e} E`:""}`:"";
-    const res=g.us!=null?`${g.us>g.them?"W":g.us<g.them?"L":"T"} ${g.us}–${g.them}`:"";
-    return `<tr><td class="l">${dParts(g.date).m} ${dParts(g.date).d} ${g.home?"vs":"at"} ${esc(g.opp)}</td><td>${res}</td><td>${bs}</td><td>${ps}</td><td>${fs}</td></tr>`;}).join("")+`</tbody>`:`<tbody><tr><td class="l note">No games yet.</td></tr></tbody>`;
+    return `<tr class="${r.kind}"><td class="l">${fmtDay(r.date)} ${esc(r.label)}</td><td>${r.res}</td><td>${bs}</td><td>${ps}</td><td>${fs}</td>${canDel?`<td>${r.kind==="outside"?`<button class="linkbtn" data-ogdel="${r.id}">Delete</button>`:""}</td>`:""}</tr>`;}).join("")+`</tbody>`:`<tbody><tr><td class="l note">No games yet.</td></tr></tbody>`;
   if(role)renderMedia($("#pl-gallery"),pid);else $("#pl-gallery").innerHTML="";
+  if(role)renderMetrics(pid);else $("#pl-metrics").innerHTML="";
   if(isAdmin)renderNotes(pid);
+  if(canEdit)prepAddForms();
 }
+$("#pl-outside").addEventListener("change",()=>renderPlayer(curPlayer));
+
+// ---- outside games ----
+function prepAddForms(){
+  if(!$("#og-bat").children.length){
+    $("#og-bat").innerHTML=BAT.map(([k,l])=>`<label>${l}<input type="number" min="0" inputmode="numeric" id="og-b-${k}"></label>`).join("");
+    $("#og-pit").innerHTML=PIT.map(([k,l])=>`<label>${l}<input ${k==="ip"?'type="text" inputmode="decimal" placeholder="2.1"':'type="number" min="0" inputmode="numeric"'} id="og-p-${k}"></label>`).join("");
+    $("#og-fld").innerHTML=FLD.map(([k,l])=>`<label>${l}<input type="number" min="0" inputmode="numeric" id="og-f-${k}"></label>`).join("");
+    $("#mt-metric").innerHTML=METRICS.map(([n,u],i)=>`<option value="${i}">${esc(n)}${u?` (${u})`:""}</option>`).join("");
+  }
+  if(!$("#og-date").value)$("#og-date").value=today();
+  if(!$("#mt-date").value)$("#mt-date").value=today();
+}
+$("#og-form").addEventListener("submit",async e=>{
+  e.preventDefault();const st=$("#og-status");
+  const val=id=>$(id).value.trim(),any=ids=>ids.some(id=>val(id)!=="");
+  const bIds=BAT.map(([k])=>"#og-b-"+k),pIds=PIT.map(([k])=>"#og-p-"+k),fIds=FLD.map(([k])=>"#og-f-"+k);
+  if(!any(bIds)&&!any(pIds)&&!any(fIds)){setStatus(st,"Enter at least one stat.","err");return;}
+  let bat=null,pit=null,fld=null;
+  if(any(bIds)){bat={};for(const [k] of BAT)bat[k]=Math.max(0,+val("#og-b-"+k)||0);if(bat.h>bat.ab){setStatus(st,"Hits can't be more than at-bats.","err");return;}if(bat.d+bat.t+bat.hr>bat.h){setStatus(st,"Extra-base hits can't be more than hits.","err");return;}}
+  if(any(pIds)){const ip=val("#og-p-ip");if(ip&&!/^\d+(\.[0-2])?$/.test(ip)){setStatus(st,"Innings should look like 2 or 2.1.","err");return;}pit={outs:ipToOuts(ip)};for(const [k] of PIT.slice(1))pit[k]=Math.max(0,+val("#og-p-"+k)||0);if(pit.er>pit.r){setStatus(st,"Earned runs can't be more than runs.","err");return;}}
+  if(any(fIds)){fld={};for(const [k] of FLD)fld[k]=Math.max(0,+val("#og-f-"+k)||0);}
+  const row={team_id:TEAM.id,player_id:curPlayer,date:$("#og-date").value,event:val("#og-event"),bat,pit,fld};
+  try{const r=await q(sb.from("player_games").insert(row).select());S.outside.push(r[0]);
+    [...bIds,...pIds,...fIds,"#og-event"].forEach(id=>$(id).value="");setStatus(st,"Saved.","ok");logAct(`Added an outside game for ${(S.players.find(x=>x.id===curPlayer)||{}).name}`);renderPlayer(curPlayer);renderAvail();}
+  catch(err){setStatus(st,/player_games/.test(err.message||"")?"Outside games aren't set up yet. Run supabase/006_player_extras.sql in Supabase.":errText(err),"err");}
+});
+let pendingOg=null;
+$("#pl-log").addEventListener("click",async e=>{
+  const d=e.target.closest("[data-ogdel]");if(!d)return;
+  if(pendingOg!==d.dataset.ogdel){pendingOg=d.dataset.ogdel;d.textContent="Tap again to delete";return;}
+  pendingOg=null;try{await q(sb.from("player_games").delete().eq("id",d.dataset.ogdel));S.outside=S.outside.filter(o=>o.id!==d.dataset.ogdel);renderPlayer(curPlayer);renderAvail();}
+  catch(err){setStatus($("#pl-log-status"),errText(err),"err");}
+});
+
+// ---- measurements ----
+const METRICS=[["Exit velocity","mph"],["Bat speed","mph"],["Pitch velocity","mph"],["Throwing velocity","mph"],["60-yard dash","sec"],["Home to first","sec"],["Pop time","sec"],["Other",""]];
+$("#mt-metric").addEventListener("change",()=>{const other=METRICS[+$("#mt-metric").value][0]==="Other";$("#mt-custom-wrap").hidden=!other;$("#mt-unit-wrap").hidden=!other;});
+let metricRows=[];
+async function renderMetrics(pid){
+  const box=$("#pl-metrics");
+  const {data,error}=await sb.from("player_metrics").select("*").eq("player_id",pid).order("date");
+  if(error){box.innerHTML=`<p class="note">${/player_metrics/.test(error.message||"")?"Measurements aren't set up yet.":esc(errText(error))}</p>`;return;}
+  metricRows=data;const by={};for(const m of data)(by[m.metric]=by[m.metric]||[]).push(m);
+  box.innerHTML=Object.entries(by).map(([name,ms])=>{
+    const u=ms[0].unit||"",num=v=>(+v).toLocaleString(undefined,{maximumFractionDigits:2}),lastV=+ms.at(-1).value,first=+ms[0].value,diff=lastV-first;
+    const sub=ms.length>1?`${diff>=0?"+":"−"}${num(Math.abs(diff))} ${u} since ${fmtDay(ms[0].date)}`:fmtDay(ms[0].date);
+    const pts=ms.map(m=>({date:m.date,y:+m.value,tip:`${fmtDay(m.date)}: ${num(m.value)} ${u}${m.note?" · "+m.note:""}`}));
+    const list=canEdit?`<details><summary class="note">Entries</summary>${ms.slice().reverse().map(m=>`<div class="note">${fmtDay(m.date)}: ${num(m.value)} ${esc(u)}${m.note?" · "+esc(m.note):""} <button class="linkbtn" data-mtdel="${m.id}">Delete</button></div>`).join("")}</details>`:"";
+    return ms.length>1?trendCard({title:name+(u?` (${u})`:""),big:`${num(lastV)} ${esc(u)}`,sub,pts,yfmt:v=>num(v),foot:list}):`<div class="trend"><h4>${esc(name)}${u?` (${esc(u)})`:""}</h4><div class="big">${num(lastV)} ${esc(u)}<small>${sub}</small></div><div class="key">Add another to see the trend.</div>${list}</div>`;
+  }).join("")||`<p class="note">No measurements yet.${canEdit?" Add one below.":""}</p>`;
+}
+$("#mt-form").addEventListener("submit",async e=>{
+  e.preventDefault();const st=$("#mt-status"),[n,u]=METRICS[+$("#mt-metric").value],other=n==="Other";
+  const metric=other?$("#mt-custom").value.trim():n,unit=other?$("#mt-unit").value.trim():u,value=$("#mt-value").value;
+  if(!metric||value===""){setStatus(st,"Enter a name and a value.","err");return;}
+  try{await q(sb.from("player_metrics").insert({team_id:TEAM.id,player_id:curPlayer,metric,unit,value:+value,date:$("#mt-date").value,note:$("#mt-note").value.trim()}));
+    $("#mt-value").value="";$("#mt-note").value="";setStatus(st,"Saved.","ok");renderMetrics(curPlayer);}
+  catch(err){setStatus(st,/player_metrics/.test(err.message||"")?"Measurements aren't set up yet. Run supabase/006_player_extras.sql in Supabase.":errText(err),"err");}
+});
+let pendingMt=null;
+$("#pl-metrics").addEventListener("click",async e=>{
+  const d=e.target.closest("[data-mtdel]");if(!d)return;
+  if(pendingMt!==d.dataset.mtdel){pendingMt=d.dataset.mtdel;d.textContent="Tap again to delete";return;}
+  pendingMt=null;try{await q(sb.from("player_metrics").delete().eq("id",d.dataset.mtdel));renderMetrics(curPlayer);}catch(err){}
+});
 async function renderNotes(pid){
   const box=$("#pl-notes");
   try{

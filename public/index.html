@@ -230,8 +230,38 @@
   <section id="v-player" class="stack" hidden>
     <div><a href="#roster" class="linkbtn">← Roster</a></div>
     <div class="player-head"><div class="jersey big" id="pl-num"></div><div><h2 id="pl-name"></h2><div class="note" id="pl-sub"></div></div></div>
+    <label class="row" style="gap:8px;font-weight:600" id="pl-scope"><input type="checkbox" id="pl-outside" checked style="width:18px;height:18px;accent-color:var(--red)"> Include games outside the team</label>
     <div id="pl-stats" class="stack" style="gap:18px"></div>
-    <div><h3 style="margin-bottom:8px">Game by game</h3><div class="tbl-wrap"><table id="pl-log"></table></div></div>
+    <div><h3 style="margin-bottom:8px">Trends</h3><div class="trends" id="pl-trends"></div></div>
+    <div class="member-only"><h3 style="margin-bottom:8px">Measurements</h3><div class="trends" id="pl-metrics"></div></div>
+    <div><h3 style="margin-bottom:8px">Game by game</h3><div class="tbl-wrap"><table id="pl-log"></table></div><span class="status" id="pl-log-status"></span></div>
+    <div class="panel edit-only" id="pl-add">
+      <details id="og-box">
+        <summary>Add a game outside the team</summary>
+        <p class="note">For a tournament, showcase, or guest spot this player played without the team. It shows on this page only and doesn't change team stats. Pitches here count toward rest days.</p>
+        <form id="og-form" class="stack" style="gap:10px">
+          <div class="row"><label class="f">Date<input type="date" id="og-date" required></label><label class="f" style="flex:1;min-width:200px">Event and opponent<input type="text" id="og-event" maxlength="120" placeholder="Fall Classic vs. Coastal Prep" required></label></div>
+          <div><div class="f-label">Batting</div><div class="og-grid" id="og-bat"></div></div>
+          <div><div class="f-label">Pitching</div><div class="og-grid" id="og-pit"></div></div>
+          <div><div class="f-label">Fielding</div><div class="og-grid" id="og-fld"></div></div>
+          <div class="row"><button class="primary" type="submit">Save game</button><span class="status" id="og-status"></span></div>
+        </form>
+      </details>
+      <details id="mt-box">
+        <summary>Add a measurement</summary>
+        <p class="note">Track anything over time, like exit velocity or a 60-yard dash. Visible to signed-in team members.</p>
+        <form id="mt-form" class="row">
+          <label class="f">Measurement<select id="mt-metric"></select></label>
+          <label class="f" id="mt-custom-wrap" hidden>Name<input type="text" id="mt-custom" maxlength="60"></label>
+          <label class="f" id="mt-unit-wrap" hidden>Unit<input type="text" id="mt-unit" maxlength="12" style="width:80px"></label>
+          <label class="f">Value<input type="number" id="mt-value" step="any" inputmode="decimal" style="width:100px" required></label>
+          <label class="f">Date<input type="date" id="mt-date" required></label>
+          <label class="f">Note (optional)<input type="text" id="mt-note" maxlength="200"></label>
+          <button class="primary" type="submit">Save</button>
+          <span class="status" id="mt-status"></span>
+        </form>
+      </details>
+    </div>
     <div class="member-only"><h3 style="margin-bottom:8px">Photos and videos</h3><div class="gallery" id="pl-gallery"></div></div>
     <div class="panel owner-only" id="pl-notes-panel">
       <h3>Coach notes</h3>

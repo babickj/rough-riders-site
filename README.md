@@ -62,6 +62,11 @@ Coach notes are visible only to the team's admins. Photos and clips are tagged w
 and can be re-tagged with the Tag button. Clips up to 50 MB upload directly (the Supabase free plan's file limit);
 longer video goes on YouTube as a link.
 
+### 7. Trends, outside games, measurements
+Run `supabase/006_player_extras.sql` once. On a player page, coaches and scorekeepers can add a game the player
+played outside the team (shown only on that page; pitches count toward rest days) and measurements such as exit
+velocity. Trends chart batting average, on-base percentage, pitches per outing, and each measurement over time.
+
 ### Later: your own web address
 In the Worker, **Settings > Domains & Routes > Add > Custom domain**. For one address per team, add each one and map it in `config.js`:
 ```js
