@@ -116,7 +116,7 @@ export async function onRequestPost({ request, env }) {
   const sa = (await q(`site_admins?user_id=eq.${caller.id}&select=user_id`)).length > 0;
   const mem = await q(`memberships?user_id=eq.${caller.id}&team_id=eq.${encodeURIComponent(team_id)}&select=role`);
   const role = sa ? "admin" : (mem[0] && mem[0].role);
-  if (role !== "admin" && role !== "scorekeeper") return json({ error: "Only coaches and scorekeepers can do this." }, 403);
+  if (!["admin", "coach", "scorekeeper"].includes(role)) return json({ error: "Only coaches and scorekeepers can do this." }, 403);
 
   try {
     if (body.action === "groups") {

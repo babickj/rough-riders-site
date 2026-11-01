@@ -70,11 +70,12 @@
 
   <section id="v-stats" class="stack" hidden>
     <div class="sec-head"><h2>Season stats</h2>
-      <div class="seg" role="group" aria-label="Stat type"><button type="button" data-st="bat" aria-pressed="true">Batting</button><button type="button" data-st="pit" aria-pressed="false">Pitching</button><button type="button" data-st="fld" aria-pressed="false">Fielding</button></div></div>
-    <div class="row"><label class="f">Game<select id="stat-game"><option value="">Whole season</option></select></label></div>
+      <div class="seg coach-only" role="group" aria-label="Stat type"><button type="button" data-st="bat" aria-pressed="true">Batting</button><button type="button" data-st="pit" aria-pressed="false">Pitching</button><button type="button" data-st="fld" aria-pressed="false">Fielding</button></div></div>
+    <div class="row coach-only"><label class="f">Game<select id="stat-game"><option value="">Whole season</option></select></label></div>
     <div class="tbl-wrap"><table id="stat-table"></table></div>
+    <div class="tbl-wrap" id="team-games-wrap" hidden><table id="team-games"></table></div>
     <p class="note" id="stat-note"></p>
-    <div>
+    <div class="coach-only">
       <div class="sec-head" style="margin-bottom:8px"><h3>Pitcher availability today</h3></div>
       <div class="avail" id="avail"></div>
       <p class="note" style="margin-top:8px" id="rest-note"></p>
@@ -114,7 +115,8 @@
       <label class="f">Their runs<input type="number" id="eg-them" min="0" style="width:80px"></label>
     </div>
     <div class="panel">
-      <div class="sec-head" style="margin:0"><h3>Lineup for this game</h3><span class="row"><button type="button" id="lu-all">Everyone</button><button type="button" id="lu-save">Save lineup</button></span></div>
+      <div class="sec-head" style="margin:0"><h3>Lineup for this game</h3><span class="row"><button type="button" id="lu-all">Everyone</button><button type="button" class="coach-only" id="gd-run">Suggest with AI</button><button type="button" id="lu-save">Save lineup</button></span></div>
+      <div id="gd-out" class="coach-only"></div>
       <p class="note">Check who is playing and set the batting order with the arrows. The stat tables and the printed scoresheet follow this lineup. Save it before the game to print a sheet with the right order.</p>
       <ol class="lineup" id="lineup"></ol>
       <span class="status" id="lu-status"></span>
@@ -162,14 +164,14 @@
         <button class="primary big" type="submit" id="si-go">Sign in</button>
         <span class="status" id="si-status"></span>
       </form>
-      <p class="note" id="si-help">Forgot your password? Ask your team admin to reset it. Schedule, results, stats, and the roster are open to everyone without signing in.</p>
+      <p class="note" id="si-help">Forgot your password? Ask your team admin to reset it. The schedule, scores, team stats, and team photos are open to everyone without signing in.</p>
       <form class="authbox panel" id="rq-form" style="max-width:440px">
         <h3>Don't have a login? Request one</h3>
-        <p class="note">Parents get access to team photos and videos. Scorekeepers can enter games and keep live score. The team admin reviews each request and sends you a password.</p>
+        <p class="note">Logins are for team staff. Scorekeepers enter games and keep live score. Coaches also see player stats, video, and coaching tools. The team admin reviews each request and sends you a password.</p>
         <label class="f">Your name<input type="text" id="rq-name" maxlength="80" autocomplete="name" required></label>
         <label class="f">Email<input type="email" id="rq-email" maxlength="200" autocomplete="email" required></label>
         <label class="f">Your player's first name<input type="text" id="rq-player" maxlength="80"></label>
-        <label class="f">I'd like to<select id="rq-role"><option value="parent">See photos and videos (parent)</option><option value="scorekeeper">Help keep score (scorekeeper)</option></select></label>
+        <label class="f">I'd like to<select id="rq-role"><option value="scorekeeper">Help keep score (scorekeeper)</option><option value="coach">Coach the team (coach)</option></select></label>
         <label class="f">Anything the admin should know (optional)<input type="text" id="rq-note" maxlength="300"></label>
         <label class="f" style="position:absolute;left:-9999px" aria-hidden="true">Website<input type="text" id="rq-web" tabindex="-1" autocomplete="off"></label>
         <button type="submit" class="primary" id="rq-go">Send request</button>
@@ -194,10 +196,11 @@
   </section>
 
   <section id="v-photos" class="stack" hidden>
-    <div class="sec-head"><h2>Photos and videos</h2></div>
+    <div class="sec-head"><h2>Photos</h2></div>
     <p class="note" id="ph-note"></p>
-    <div class="panel member-only" id="ph-add">
+    <div class="panel coach-only" id="ph-add">
       <h3>Add photos or video clips</h3>
+      <p class="note">Only upload with the family's permission. Photos tagged Team are public on the site; everything else is for coaches only.</p>
       <div class="row">
         <input type="file" id="ph-files" accept="image/*,video/*" multiple>
         <label class="f">Game (optional)<select id="ph-game"></select></label>
@@ -215,7 +218,7 @@
       </details>
       <span class="status" id="ph-status"></span>
     </div>
-    <div class="row member-only"><label class="f">Show<select id="ph-filter"></select></label></div>
+    <div class="row coach-only"><label class="f">Show<select id="ph-filter"></select></label></div>
     <div class="gallery" id="gallery"></div>
   </section>
   <div class="lightbox" id="lightbox" hidden><img id="lb-img" alt=""></div>
@@ -230,12 +233,19 @@
   <section id="v-player" class="stack" hidden>
     <div><a href="#roster" class="linkbtn">← Roster</a></div>
     <div class="player-head"><div class="jersey big" id="pl-num"></div><div><h2 id="pl-name"></h2><div class="note" id="pl-sub"></div></div></div>
+    <label class="row coach-only" style="gap:8px"><input type="checkbox" id="pl-aiok" style="width:18px;height:18px;accent-color:var(--red)"> Family has OK'd AI review of this player's photos and video</label>
+    <div class="panel coach-only" id="ai-panel">
+      <div class="sec-head" style="margin:0"><h3>AI coaching report</h3><button class="primary" type="button" id="ai-run">Write a new report</button></div>
+      <p class="note">Reads this player's stats, trends, measurements, and coach notes, and suggests strengths, things to work on, and drills. Clip reviews from the Photos section below also land here.</p>
+      <span class="status" id="ai-status"></span>
+      <div id="ai-reports"></div>
+    </div>
     <label class="row" style="gap:8px;font-weight:600" id="pl-scope"><input type="checkbox" id="pl-outside" checked style="width:18px;height:18px;accent-color:var(--red)"> Include games outside the team</label>
     <div id="pl-stats" class="stack" style="gap:18px"></div>
     <div><h3 style="margin-bottom:8px">Trends</h3><div class="trends" id="pl-trends"></div></div>
-    <div class="member-only"><h3 style="margin-bottom:8px">Measurements</h3><div class="trends" id="pl-metrics"></div></div>
+    <div class="coach-only"><h3 style="margin-bottom:8px">Measurements</h3><div class="trends" id="pl-metrics"></div></div>
     <div><h3 style="margin-bottom:8px">Game by game</h3><div class="tbl-wrap"><table id="pl-log"></table></div><span class="status" id="pl-log-status"></span></div>
-    <div class="panel edit-only" id="pl-add">
+    <div class="panel coach-only" id="pl-add">
       <details id="og-box">
         <summary>Add a game outside the team</summary>
         <p class="note">For a tournament, showcase, or guest spot this player played without the team. It shows on this page only and doesn't change team stats. Pitches here count toward rest days.</p>
@@ -249,7 +259,7 @@
       </details>
       <details id="mt-box">
         <summary>Add a measurement</summary>
-        <p class="note">Track anything over time, like exit velocity or a 60-yard dash. Visible to signed-in team members.</p>
+        <p class="note">Track anything over time, like exit velocity or a 60-yard dash. Coaches only.</p>
         <form id="mt-form" class="row">
           <label class="f">Measurement<select id="mt-metric"></select></label>
           <label class="f" id="mt-custom-wrap" hidden>Name<input type="text" id="mt-custom" maxlength="60"></label>
@@ -262,10 +272,10 @@
         </form>
       </details>
     </div>
-    <div class="member-only"><h3 style="margin-bottom:8px">Photos and videos</h3><div class="gallery" id="pl-gallery"></div></div>
-    <div class="panel owner-only" id="pl-notes-panel">
+    <div class="coach-only"><h3 style="margin-bottom:8px">Photos and videos</h3><div class="gallery" id="pl-gallery"></div></div>
+    <div class="panel coach-only" id="pl-notes-panel">
       <h3>Coach notes</h3>
-      <p class="note">Only this team's coaches (admins) can see these notes. Write them as if the family might read them someday.</p>
+      <p class="note">Only this team's coaches and admins can see these notes. Write them as if the family might read them someday.</p>
       <form id="pl-note-form" class="stack" style="gap:8px">
         <div class="row"><label class="f">Topic<select id="pl-note-topic"><option value="general">General</option><option value="hitting">Hitting</option><option value="pitching">Pitching</option><option value="fielding">Fielding</option><option value="baserunning">Baserunning</option><option value="effort">Effort and attitude</option></select></label></div>
         <textarea id="pl-note-body" maxlength="4000" placeholder="What did you see? What should they work on?"></textarea>
@@ -298,7 +308,7 @@
     </div>
     <div class="panel">
       <h3>People</h3>
-      <p class="note">Admins manage people and settings. Scorekeepers enter games and keep live score. Parents see photos and videos. Everyone else can see the schedule, stats, and roster without an account.</p>
+      <p class="note">Admins manage people and settings. Coaches see player stats, player pages, video, coach notes, and the AI tools, and upload photos and video. Scorekeepers enter games and keep live score. Everyone else sees the schedule, scores, team stats, and team photos without an account.</p>
       <div class="tbl-wrap"><table class="members" id="ad-members"></table></div>
       <span class="status" id="ad-mstatus"></span>
       <div id="ad-pwbox" hidden class="banner"></div>
@@ -308,7 +318,7 @@
       <div class="row">
         <label class="f">Name<input type="text" id="ad-name"></label>
         <label class="f">Email<input type="email" id="ad-email"></label>
-        <label class="f">Role<select id="ad-role"><option value="parent">Parent</option><option value="scorekeeper">Scorekeeper</option><option value="admin">Admin</option></select></label>
+        <label class="f">Role<select id="ad-role"><option value="coach">Coach</option><option value="scorekeeper">Scorekeeper</option><option value="admin">Admin</option><option value="parent">Parent (team photos only)</option></select></label>
         <label class="row" id="ad-all-wrap" hidden style="gap:6px;align-self:center"><input type="checkbox" id="ad-all" style="width:18px;height:18px;accent-color:var(--red)"> Add to every team</label>
         <button class="primary" type="button" id="ad-add">Add person</button>
       </div>

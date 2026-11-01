@@ -23,15 +23,20 @@ export async function onRequestPost({ request, env }) {
   let body; try { body = await request.json(); } catch { return json({ error: "Bad request." }, 400); }
   const h = { apikey: svc, Authorization: `Bearer ${svc}` };
   const sa = await (await fetch(`${base}/rest/v1/site_admins?user_id=eq.${caller.id}&select=user_id`, { headers: h })).json();
-  const mem = await (await fetch(`${base}/rest/v1/memberships?user_id=eq.${caller.id}&team_id=eq.${encodeURIComponent(body.team_id || "")}&role=in.(admin,scorekeeper)&select=user_id`, { headers: h })).json();
+  const mem = await (await fetch(`${base}/rest/v1/memberships?user_id=eq.${caller.id}&team_id=eq.${encodeURIComponent(body.team_id || "")}&role=in.(admin,coach,scorekeeper)&select=user_id`, { headers: h })).json();
   if (!sa.length && !mem.length) return json({ error: "Only coaches and scorekeepers can use this." }, 403);
 
   const content = [];
-  if (body.image) {
-    if (body.image.length > 7_000_000) return json({ error: "That photo is too large. Try a smaller one." }, 400);
-    content.push({ type: "image", source: { type: "base64", media_type: body.media_type || "image/jpeg", data: body.image } });
+  const images = Array.isArray(body.images) ? body.images : body.image ? [{ data: body.image, media_type: body.media_type }] : [];
+  if (images.length > 16) return json({ error: "Send at most 16 images at a time." }, 400);
+  let total = 0;
+  for (const im of images) {
+    const data = String(im.data || ""); total += data.length;
+    if (data.length > 7_000_000 || total > 20_000_000) return json({ error: "Those images are too large. Try fewer or smaller ones." }, 400);
+    if (im.label) content.push({ type: "text", text: String(im.label).slice(0, 200) });
+    content.push({ type: "image", source: { type: "base64", media_type: im.media_type || "image/jpeg", data } });
   }
-  content.push({ type: "text", text: String(body.prompt || "").slice(0, 20000) });
+  content.push({ type: "text", text: String(body.prompt || "").slice(0, 60000) });
 
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",

@@ -66,7 +66,7 @@ export async function onRequestPost({ request, env }) {
     const email = String(body.email || "").trim().toLowerCase();
     const role = body.role;
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error: "Enter a valid email address." }, 400);
-    if (!["admin", "scorekeeper", "parent"].includes(role)) return json({ error: "Pick a role." }, 400);
+    if (!["admin", "coach", "scorekeeper", "parent"].includes(role)) return json({ error: "Pick a role." }, 400);
     let user = await findUserByEmail(email), created = false;
     if (!user) {
       if (!body.password || String(body.password).length < 8) return json({ error: "Set a temporary password of at least 8 characters." }, 400);
@@ -86,7 +86,7 @@ export async function onRequestPost({ request, env }) {
   if (!/^[0-9a-f-]{36}$/.test(target)) return json({ error: "Pick a person." }, 400);
 
   if (action === "set_role") {
-    if (!["admin", "scorekeeper", "parent"].includes(body.role)) return json({ error: "Pick a role." }, 400);
+    if (!["admin", "coach", "scorekeeper", "parent"].includes(body.role)) return json({ error: "Pick a role." }, 400);
     if (target === caller.id && body.role !== "admin" && !siteAdmin) return json({ error: "You can't remove your own admin access." }, 400);
     const r = await rest(`memberships?user_id=eq.${target}&team_id=eq.${encodeURIComponent(team_id)}`, { method: "PATCH", body: JSON.stringify({ role: body.role }) });
     return r.ok ? json({ ok: true }) : json({ error: "Couldn't change the role." }, 400);

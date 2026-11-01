@@ -15,12 +15,12 @@ Static site and a small Worker on Cloudflare, data and logins in Supabase.
 - `supabase/seed.sql`: creates the team and makes you the owner
 - `public/logos/rough-riders.jpg`: team logo (a second team's logo goes in `public/logos/<team-web-name>.jpg`, or upload it in Admin)
 
-## Who can do what
+## Who can do what (after supabase/007_coach_ai.sql)
 
-- Anyone: schedule, results, live score, stats, roster (first names and numbers only)
-- Parents (signed in): plus photos and videos, and can add their own
+- Anyone: schedule, scores, live line score, team stat totals, roster (first names and numbers), photos tagged Team
 - Scorekeepers: plus entering games, lineups, live scoring, roster and schedule changes
-- Admins: plus adding people, changing roles, resetting passwords, team settings
+- Coaches: plus individual stats, player pages, all photos and video, uploads, coach notes, measurements, AI tools
+- Admins: plus adding people, changing roles, resetting passwords, team settings, Spond
 
 ## Setup
 
@@ -66,6 +66,14 @@ longer video goes on YouTube as a link.
 Run `supabase/006_player_extras.sql` once. On a player page, coaches and scorekeepers can add a game the player
 played outside the team (shown only on that page; pitches count toward rest days) and measurements such as exit
 velocity. Trends chart batting average, on-base percentage, pitches per outing, and each measurement over time.
+
+### 8. Coach role and AI
+Run `supabase/007_coach_ai.sql` once, and add `ANTHROPIC_API_KEY` (type Secret) to the Worker.
+- Player page > **Write a new report**: development report from stats, trends, measurements and coach notes.
+- Photos > **AI review** on a clip or photo: about 10 frames are pulled in the browser and reviewed. Every tagged
+  player needs **Family has OK'd AI review** checked on their page first.
+- Enter game > lineup > **Suggest with AI**: batting order and pitching plan that respects rest days and the pitch limit.
+Reports are saved per player and visible to coaches and admins only.
 
 ### Later: your own web address
 In the Worker, **Settings > Domains & Routes > Add > Custom domain**. For one address per team, add each one and map it in `config.js`:

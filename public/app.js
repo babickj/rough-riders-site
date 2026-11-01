@@ -7,7 +7,7 @@ const CFG=window.RR_CONFIG||{};
 const configured=CFG.supabaseUrl&&!/PASTE_/.test(CFG.supabaseUrl);
 const sb=configured?window.supabase.createClient(CFG.supabaseUrl,CFG.supabaseAnonKey):null;
 
-let S=null, TEAM=null, teams=[], session=null, role=null, siteAdmin=false, canEdit=false, isAdmin=false, aiEnabled=false;
+let S=null, TEAM=null, teams=[], session=null, role=null, siteAdmin=false, canEdit=false, isAdmin=false, isCoach=false, aiEnabled=false;
 const me={id:null,email:"",name:""};
 let curLineup=null, pendingEnter=null, pendingData=null, myTeams=[];
 
@@ -70,6 +70,8 @@ async function loadTeamData(){
   S={team:{name:TEAM.name,season:TEAM.season,league:TEAM.league,innings:TEAM.innings||6,pitchMax:TEAM.pitch_max||85},
      players:p.data, games:g.data, lines:{}};
   for(const r of l.data)S.lines[r.game_id]={bat:r.bat||{},pit:r.pit||{},fld:r.fld||{}};
+  const tt=await sb.rpc("team_totals",{t:TEAM.id});
+  S.totals={};if(!tt.error)for(const r of tt.data||[])S.totals[r.game_id]={bat:r.bat||{},pit:r.pit||{},fld:r.fld||{}};
   const o=await sb.from("player_games").select("*").eq("team_id",TEAM.id).order("date");
   S.outside=o.error?[]:o.data; S.outsideReady=!o.error;
 }
@@ -94,6 +96,7 @@ async function api(path,body){
   return j;
 }
 async function ai(prompt,image,mediaType){return (await api("/api/ai",{team_id:TEAM.id,prompt,image,media_type:mediaType})).data;}
+async function aiImages(prompt,images){return (await api("/api/ai",{team_id:TEAM.id,prompt,images})).data;}
 function resizeImage(file,max,quality){
   return new Promise((res,rej)=>{
     const img=new Image(),url=URL.createObjectURL(file);
@@ -120,16 +123,18 @@ async function refreshRole(){
       else{const all=await sb.from("memberships").select("team_id").eq("user_id",me.id);myTeams=(all.data||[]).map(x=>x.team_id);}
     }catch(e){}
   }
-  canEdit=role==="admin"||role==="scorekeeper"; isAdmin=role==="admin";
+  isAdmin=role==="admin"; isCoach=isAdmin||role==="coach"; canEdit=isCoach||role==="scorekeeper";
   document.body.classList.toggle("signed-in",!!session);
   document.body.classList.toggle("is-member",!!role);
   document.body.classList.toggle("can-edit",canEdit);
   document.body.classList.toggle("is-owner",isAdmin);
+  document.body.classList.toggle("is-coach",isCoach);
 }
+const ROLE_LABEL={admin:"Admin",coach:"Coach",scorekeeper:"Scorekeeper",parent:"Parent"};
 function renderAcct(){
   const a=$("#acct");
   const all=teams.length>1?`<a href="/">All teams</a>`:"";
-  if(session)a.innerHTML=`<div>${esc(me.name||me.email)}</div>${role?`<span class="role">${role==="admin"?"Admin":role==="scorekeeper"?"Scorekeeper":"Parent"}</span>`:""}<div><a href="#account">My account</a> · <a href="#" data-signout>Sign out</a>${all?" · "+all:""}</div>`;
+  if(session)a.innerHTML=`<div>${esc(me.name||me.email)}</div>${role?`<span class="role">${ROLE_LABEL[role]||role}</span>`:""}<div><a href="#account">My account</a> · <a href="#" data-signout>Sign out</a>${all?" · "+all:""}</div>`;
   else a.innerHTML=all?`<div>${all}</div>`:"";
   $("#rq-form").hidden=!!session;
   const st=$("#si-state");
@@ -196,7 +201,7 @@ function gameRowHtml(g){
   const p=dParts(g.date); let res="";
   if(g.status==="final"&&g.us!=null){const k=g.us>g.them?"w":g.us<g.them?"l":"t";res=`<span class="pill ${k}">${k.toUpperCase()}</span>${g.us}–${g.them}`;}
   else res=`<span class="pill up">${esc(g.time)}</span>`;
-  const actions=[S.lines[g.id]?`<button class="linkbtn" data-box="${g.id}">Box score</button>`:"",canEdit?`<button class="linkbtn" data-edit="${g.id}">Edit</button>`:"",canEdit?`<button class="linkbtn" data-enter="${g.id}">Enter stats</button>`:""].filter(Boolean).join(" · ");
+  const actions=[isCoach&&S.lines[g.id]?`<button class="linkbtn" data-box="${g.id}">Box score</button>`:"",canEdit?`<button class="linkbtn" data-edit="${g.id}">Edit</button>`:"",canEdit?`<button class="linkbtn" data-enter="${g.id}">Enter stats</button>`:""].filter(Boolean).join(" · ");
   return `<div class="game"><div class="gdate"><div class="m">${dow(g.date)} ${p.m}</div><div class="d">${p.d}</div></div>
   <div class="gmain"><div class="gopp">${g.home?"vs":"at"} ${esc(g.opp)}</div><div class="gmeta">${esc(g.loc)}${g.status==="final"?"":" · "+esc(g.time)}</div></div>
   <div class="gres">${res}<small>${actions}</small></div></div>`;
@@ -225,7 +230,30 @@ function openGameForm(g){
 // ---------- stats view ----------
 let statType="bat", sortKey={bat:"avg",pit:"era",fld:"tc"}, sortDir={bat:-1,pit:1,fld:-1};
 function pRow(pid){return S.players.find(p=>p.id===pid)||{num:"",name:"(removed)"};}
+// Team-level stats for everyone who isn't a coach: totals and a line per game, no player names.
+function teamLines(){
+  const out={};
+  for(const g of S.games){const tot=S.totals&&S.totals[g.id];if(tot){out[g.id]=tot;continue;}
+    const L=S.lines[g.id];if(!L)continue;const sum=o=>{const x={};for(const v of Object.values(o||{}))for(const [k,n] of Object.entries(v))x[k]=(x[k]||0)+(+n||0);return x;};
+    out[g.id]={bat:sum(L.bat),pit:sum(L.pit),fld:sum(L.fld)};}
+  return out;
+}
+function renderTeamStats(){
+  const T=teamLines(),games=S.games.filter(g=>T[g.id]).sort((a,b)=>a.date.localeCompare(b.date));
+  const n=x=>+x||0,rate=(a,b)=>b?fmt3(a/b):"—";
+  const tot={};for(const g of games){for(const [k,v] of Object.entries(T[g.id].bat))tot["b_"+k]=(tot["b_"+k]||0)+n(v);for(const [k,v] of Object.entries(T[g.id].pit))tot["p_"+k]=(tot["p_"+k]||0)+n(v);for(const [k,v] of Object.entries(T[g.id].fld))tot["f_"+k]=(tot["f_"+k]||0)+n(v);}
+  const pa=n(tot.b_ab)+n(tot.b_bb)+n(tot.b_hbp),tb=n(tot.b_h)+n(tot.b_d)+2*n(tot.b_t)+3*n(tot.b_hr),ip=n(tot.p_outs)/3;
+  const r=record();
+  $("#stat-table").innerHTML=games.length?`<thead><tr>${["G","Record","R","H","2B","3B","HR","BB","K","SB","AVG","OBP","SLG","Runs allowed","Team ERA","K (pitching)","E"].map(x=>`<th style="cursor:default">${x}</th>`).join("")}</tr></thead><tbody><tr>
+    <td>${games.length}</td><td>${r.w}–${r.l}${r.t?"–"+r.t:""}</td><td>${r.rs}</td><td>${n(tot.b_h)}</td><td>${n(tot.b_d)}</td><td>${n(tot.b_t)}</td><td>${n(tot.b_hr)}</td><td>${n(tot.b_bb)}</td><td>${n(tot.b_so)}</td><td>${n(tot.b_sb)}</td>
+    <td>${rate(n(tot.b_h),n(tot.b_ab))}</td><td>${rate(n(tot.b_h)+n(tot.b_bb)+n(tot.b_hbp),pa)}</td><td>${rate(tb,n(tot.b_ab))}</td><td>${r.ra}</td><td>${ip?fmt2(n(tot.p_er)*inn()/ip):"—"}</td><td>${n(tot.p_so)}</td><td>${n(tot.f_e)}</td></tr></tbody>`:"";
+  $("#team-games-wrap").hidden=!games.length;
+  $("#team-games").innerHTML=games.length?`<thead><tr><th class="l" style="cursor:default">Game</th>${["Result","AB","H","2B","3B","HR","BB","K","SB","AVG"].map(x=>`<th style="cursor:default">${x}</th>`).join("")}</tr></thead><tbody>${games.slice().reverse().map(g=>{const b=T[g.id].bat;return `<tr><td class="l">${dParts(g.date).m} ${dParts(g.date).d} ${g.home?"vs":"at"} ${esc(g.opp)}</td><td>${g.us!=null?`${g.us>g.them?"W":g.us<g.them?"L":"T"} ${g.us}–${g.them}`:""}</td><td>${n(b.ab)}</td><td>${n(b.h)}</td><td>${n(b.d)}</td><td>${n(b.t)}</td><td>${n(b.hr)}</td><td>${n(b.bb)}</td><td>${n(b.so)}</td><td>${n(b.sb)}</td><td>${rate(n(b.h),n(b.ab))}</td></tr>`}).join("")}</tbody>`:"";
+  $("#stat-note").textContent=games.length?"Team totals. Player stats are shared with the coaching staff.":"No stats entered yet.";
+}
 function renderStats(){
+  if(!isCoach){renderTeamStats();return;}
+  $("#team-games-wrap").hidden=true;
   const sel=$("#stat-game"),cur=sel.value;
   sel.innerHTML=`<option value="">Whole season</option>`+S.games.filter(g=>S.lines[g.id]).sort((a,b)=>b.date.localeCompare(a.date)).map(g=>`<option value="${g.id}">${dParts(g.date).m} ${dParts(g.date).d} ${g.home?"vs":"at"} ${esc(g.opp)}</option>`).join("");
   sel.value=cur;
@@ -275,7 +303,7 @@ let editingPlayer=null;
 function renderRoster(){
   const T=batTotals(""),P=pitTotals("");
   $("#roster").innerHTML=sortedPlayers().map(p=>{const b=T[p.id],q=P[p.id];
-    return `<div class="card"><div class="jersey">${p.num}</div><div style="min-width:0;flex:1"><div class="nm">${plink(p)}</div><div class="ln">${b?`${fmt3(b.avg)} AVG · ${b.h} H · ${b.rbi} RBI`:"No at-bats yet"}</div>${q?`<div class="ln">${outsToIp(q.outs)} IP · ${fmt2(q.era)} ERA</div>`:""}${canEdit?`<button class="linkbtn" data-pedit="${p.id}">Edit</button>`:""}</div></div>`}).join("")||`<p class="note">No players yet.</p>`;
+    return `<div class="card"><div class="jersey">${p.num}</div><div style="min-width:0;flex:1"><div class="nm">${plink(p)}</div>${isCoach?`<div class="ln">${b?`${fmt3(b.avg)} AVG · ${b.h} H · ${b.rbi} RBI`:"No at-bats yet"}</div>${q?`<div class="ln">${outsToIp(q.outs)} IP · ${fmt2(q.era)} ERA</div>`:""}`:""}${canEdit?`<button class="linkbtn" data-pedit="${p.id}">Edit</button>`:""}</div></div>`}).join("")||`<p class="note">No players yet.</p>`;
   $("#ts-season").value=S.team.season||"";$("#ts-league").value=S.team.league||"";$("#ts-inn").value=inn();$("#ts-pmax").value=S.team.pitchMax||85;
   $("#ts-prest").value=fmtRest(restTiers());$("#ts-prules").value=presetFor(S.team.pitchMax,TEAM.pitch_rest&&TEAM.pitch_rest.length?TEAM.pitch_rest:null);
 }
@@ -365,10 +393,10 @@ async function signedUrls(rows){
   return urls;
 }
 function tileHtml(m,urls){
-  const canEdit_=m.created_by===me.id||canEdit, del=(m.created_by===me.id||isAdmin)?` · <button class="linkbtn" data-mdel="${m.id}">Delete</button>`:"";
-  const edit=canEdit_?`<button class="linkbtn" data-mtag="${m.id}">Tag</button>`:"";
+  const canEdit_=isCoach, del=isCoach?` · <button class="linkbtn" data-mdel="${m.id}">Delete</button>`:"";
+  const edit=canEdit_?`<button class="linkbtn" data-mtag="${m.id}">Tag</button>${aiEnabled&&m.path&&(m.players||[]).length?` · <button class="linkbtn" data-mai="${m.id}">AI review</button>`:""}`:"";
   const cap=[m.caption,gname(m.game_id)].filter(Boolean).join(" · ");
-  const tags=[m.team_tag?`<span>Team</span>`:"",...(m.players||[]).map(id=>{const p=S.players.find(x=>x.id===id);return p?`<a href="#player-${p.id}">#${p.num} ${esc(p.name)}</a>`:""})].join("")||(canEdit_?`<span>Not tagged</span>`:"");
+  const tags=!isCoach?"":[m.team_tag?`<span>Team</span>`:"",...(m.players||[]).map(id=>{const p=S.players.find(x=>x.id===id);return p?`<a href="#player-${p.id}">#${p.num} ${esc(p.name)}</a>`:""})].join("")||(canEdit_?`<span>Not tagged</span>`:"");
   const foot=`<div class="cap"><span>${esc(cap)}</span><span>${edit}${del}</span></div>${tags?`<div class="tags">${tags}</div>`:""}`;
   if(m.kind==="video"&&m.url){const id=ytId(m.url);return id?`<div class="tile video"><div class="vid"><iframe src="https://www.youtube-nocookie.com/embed/${id}" title="${esc(m.caption||"Team video")}" loading="lazy" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen></iframe></div>${foot}</div>`:"";}
   const u=urls[m.path];if(!u)return "";
@@ -393,9 +421,9 @@ async function renderPhotos(){
   $("#ph-game").innerHTML=`<option value="">None</option>`+[...S.games].sort((a,b)=>b.date.localeCompare(a.date)).map(g=>`<option value="${g.id}">${dParts(g.date).m} ${dParts(g.date).d} ${g.home?"vs":"at"} ${esc(g.opp)}</option>`).join("");
   $("#ph-tags").innerHTML=chipsHtml(upTags);
   const f=$("#ph-filter"),cur=f.value;
-  f.innerHTML=`<option value="">Everything</option><option value="team">Team photos</option>${canEdit?`<option value="untagged">Not tagged yet</option>`:""}`+sortedPlayers().map(p=>`<option value="${p.id}">#${p.num} ${esc(p.name)}</option>`).join("");f.value=cur;
-  if(!role){note.innerHTML=session?"Your account isn't on this team yet, so photos stay hidden. Ask the team admin to add you.":`Team photos and videos are for families on the team. <a href="#signin">Sign in or request a login</a> to see them.`;gal.innerHTML="";return;}
-  note.textContent="Visible only to signed-in team members.";
+  f.innerHTML=`<option value="">Everything</option><option value="team">Team photos</option><option value="untagged">Not tagged yet</option>`+sortedPlayers().map(p=>`<option value="${p.id}">#${p.num} ${esc(p.name)}</option>`).join("");f.value=cur;
+  if(!isCoach){note.textContent="Team photos. Photos of individual players and video are shared with the coaching staff only.";renderMedia(gal,"team");return;}
+  note.textContent="Photos tagged Team are public. Everything else, including video, is visible to coaches and admins only.";
   renderMedia(gal,f.value);
 }
 $("#ph-filter").addEventListener("change",()=>renderMedia($("#gallery"),$("#ph-filter").value));
@@ -456,7 +484,7 @@ $("#tag-save").onclick=async()=>{
 // ---------- player pages ----------
 let curPlayer=null,curView=null;
 const TOPICS={general:"General",hitting:"Hitting",pitching:"Pitching",fielding:"Fielding",baserunning:"Baserunning",effort:"Effort and attitude"};
-const plink=p=>`<a class="pl" href="#player-${p.id}">${esc(p.name)}</a>`;
+const plink=p=>isCoach?`<a class="pl" href="#player-${p.id}">${esc(p.name)}</a>`:esc(p.name);
 // Every game line for one player: team games plus games played outside the team.
 function playerLines(pid,incOut){
   const out=[];
@@ -535,17 +563,16 @@ function renderPlayer(pid){
   if(pcPts.length)cards.push(trendCard({title:"Pitches per outing",big:String(pcPts.at(-1).y),sub:"last outing",pts:pcPts,yfmt:v=>String(Math.round(v)),bars:true,yMin:0,refY:S.team.pitchMax,refLabel:`${S.team.pitchMax} limit`,foot:outKey}));
   $("#pl-trends").innerHTML=cards.join("")||`<p class="note">Trends appear after two games with at-bats, or after the first pitching outing.</p>`;
   // game log
-  const canDel=canEdit;
+  const canDel=isCoach;
   $("#pl-log").innerHTML=rows.length?`<thead><tr><th class="l" style="cursor:default">Game</th><th style="cursor:default">Result</th><th style="cursor:default">Batting</th><th style="cursor:default">Pitching</th><th style="cursor:default">Fielding</th>${canDel?"<th></th>":""}</tr></thead><tbody>`+[...rows].reverse().map(r=>{
     const b=r.bat,q_=r.pit,f=r.fld;
     const bs=b?[`${b.h||0}-${b.ab||0}`,b.d?`${b.d} 2B`:"",b.t?`${b.t} 3B`:"",b.hr?`${b.hr} HR`:"",b.rbi?`${b.rbi} RBI`:"",b.r?`${b.r} R`:"",b.bb?`${b.bb} BB`:"",b.so?`${b.so} K`:"",b.sb?`${b.sb} SB`:""].filter(Boolean).join(", "):"";
     const ps=q_?`${outsToIp(q_.outs||0)} IP, ${q_.pc||0} P, ${q_.so||0} K, ${q_.er||0} ER`:"";
     const fs=f?`${f.po||0} PO, ${f.a||0} A${f.e?`, ${f.e} E`:""}`:"";
     return `<tr class="${r.kind}"><td class="l">${fmtDay(r.date)} ${esc(r.label)}</td><td>${r.res}</td><td>${bs}</td><td>${ps}</td><td>${fs}</td>${canDel?`<td>${r.kind==="outside"?`<button class="linkbtn" data-ogdel="${r.id}">Delete</button>`:""}</td>`:""}</tr>`;}).join("")+`</tbody>`:`<tbody><tr><td class="l note">No games yet.</td></tr></tbody>`;
-  if(role)renderMedia($("#pl-gallery"),pid);else $("#pl-gallery").innerHTML="";
-  if(role)renderMetrics(pid);else $("#pl-metrics").innerHTML="";
-  if(isAdmin)renderNotes(pid);
-  if(canEdit)prepAddForms();
+  if(!isCoach)return;
+  renderMedia($("#pl-gallery"),pid);renderMetrics(pid);renderNotes(pid);prepAddForms();
+  $("#pl-aiok").checked=!!p.ai_ok;renderReports(pid);
 }
 $("#pl-outside").addEventListener("change",()=>renderPlayer(curPlayer));
 
@@ -595,9 +622,9 @@ async function renderMetrics(pid){
     const u=ms[0].unit||"",num=v=>(+v).toLocaleString(undefined,{maximumFractionDigits:2}),lastV=+ms.at(-1).value,first=+ms[0].value,diff=lastV-first;
     const sub=ms.length>1?`${diff>=0?"+":"−"}${num(Math.abs(diff))} ${u} since ${fmtDay(ms[0].date)}`:fmtDay(ms[0].date);
     const pts=ms.map(m=>({date:m.date,y:+m.value,tip:`${fmtDay(m.date)}: ${num(m.value)} ${u}${m.note?" · "+m.note:""}`}));
-    const list=canEdit?`<details><summary class="note">Entries</summary>${ms.slice().reverse().map(m=>`<div class="note">${fmtDay(m.date)}: ${num(m.value)} ${esc(u)}${m.note?" · "+esc(m.note):""} <button class="linkbtn" data-mtdel="${m.id}">Delete</button></div>`).join("")}</details>`:"";
+    const list=isCoach?`<details><summary class="note">Entries</summary>${ms.slice().reverse().map(m=>`<div class="note">${fmtDay(m.date)}: ${num(m.value)} ${esc(u)}${m.note?" · "+esc(m.note):""} <button class="linkbtn" data-mtdel="${m.id}">Delete</button></div>`).join("")}</details>`:"";
     return ms.length>1?trendCard({title:name+(u?` (${u})`:""),big:`${num(lastV)} ${esc(u)}`,sub,pts,yfmt:v=>num(v),foot:list}):`<div class="trend"><h4>${esc(name)}${u?` (${esc(u)})`:""}</h4><div class="big">${num(lastV)} ${esc(u)}<small>${sub}</small></div><div class="key">Add another to see the trend.</div>${list}</div>`;
-  }).join("")||`<p class="note">No measurements yet.${canEdit?" Add one below.":""}</p>`;
+  }).join("")||`<p class="note">No measurements yet. Add one below.</p>`;
 }
 $("#mt-form").addEventListener("submit",async e=>{
   e.preventDefault();const st=$("#mt-status"),[n,u]=METRICS[+$("#mt-metric").value],other=n==="Other";
@@ -649,7 +676,7 @@ async function renderAdmin(){
   try{
     members=(await api("/api/admin",{action:"list",team_id:TEAM.id})).members||[];
     $("#ad-members").innerHTML=`<thead><tr><th class="l">Name</th><th class="l">Email</th><th class="l">Role</th><th class="l"></th></tr></thead><tbody>`+
-      members.map(m=>`<tr><td class="l">${esc(m.display_name||"")}</td><td class="l">${esc(m.email)}</td><td class="l"><select data-role="${m.user_id}" aria-label="Role for ${esc(m.email)}">${["parent","scorekeeper","admin"].map(r=>`<option value="${r}" ${m.role===r?"selected":""}>${r[0].toUpperCase()+r.slice(1)}</option>`).join("")}</select></td><td class="l"><button class="linkbtn" data-reset="${m.user_id}">Reset password</button>${m.user_id===me.id?"":` · <button class="linkbtn" data-remove="${m.user_id}">Remove</button>`}</td></tr>`).join("")+`</tbody>`;
+      members.map(m=>`<tr><td class="l">${esc(m.display_name||"")}</td><td class="l">${esc(m.email)}</td><td class="l"><select data-role="${m.user_id}" aria-label="Role for ${esc(m.email)}">${["coach","scorekeeper","admin","parent"].map(r=>`<option value="${r}" ${m.role===r?"selected":""}>${ROLE_LABEL[r]}</option>`).join("")}</select></td><td class="l"><button class="linkbtn" data-reset="${m.user_id}">Reset password</button>${m.user_id===me.id?"":` · <button class="linkbtn" data-remove="${m.user_id}">Remove</button>`}</td></tr>`).join("")+`</tbody>`;
     setStatus(st,members.length?"":"No one added yet.");
   }catch(e){setStatus(st,errText(e),"err");}
   $("#ad-teams").hidden=!siteAdmin;
@@ -752,7 +779,7 @@ async function loadRequests(){
   const a=$('nav.tabs a[data-v="admin"]');if(a)a.textContent=requests.length?`Admin (${requests.length})`:"Admin";
   const list=$("#rq-list");if(!list)return;
   if(error){list.innerHTML=`<p class="note">Requests aren't set up yet. Run supabase/003_access_requests.sql in Supabase.</p>`;return;}
-  list.innerHTML=requests.length?`<div class="tbl-wrap"><table class="members"><thead><tr><th class="l">Name</th><th class="l">Email</th><th class="l">Player</th><th class="l">Role</th><th class="l"></th></tr></thead><tbody>${requests.map(r=>`<tr><td class="l">${esc(r.name)}${r.note?`<div class="note">${esc(r.note)}</div>`:""}</td><td class="l">${esc(r.email)}</td><td class="l">${esc(r.player)}</td><td class="l"><select data-rqrole="${r.id}" aria-label="Role for ${esc(r.name)}">${["parent","scorekeeper","admin"].map(x=>`<option value="${x}" ${r.role===x?"selected":""}>${x[0].toUpperCase()+x.slice(1)}</option>`).join("")}</select></td><td class="l"><button class="linkbtn" data-rqok="${r.id}">Approve</button> · <button class="linkbtn" data-rqno="${r.id}">Decline</button></td></tr>`).join("")}</tbody></table></div>`:`<p class="note">No requests waiting. Visitors can ask for a login from the Sign in page.</p>`;
+  list.innerHTML=requests.length?`<div class="tbl-wrap"><table class="members"><thead><tr><th class="l">Name</th><th class="l">Email</th><th class="l">Player</th><th class="l">Role</th><th class="l"></th></tr></thead><tbody>${requests.map(r=>`<tr><td class="l">${esc(r.name)}${r.note?`<div class="note">${esc(r.note)}</div>`:""}</td><td class="l">${esc(r.email)}</td><td class="l">${esc(r.player)}</td><td class="l"><select data-rqrole="${r.id}" aria-label="Role for ${esc(r.name)}">${["coach","scorekeeper","admin","parent"].map(x=>`<option value="${x}" ${r.role===x?"selected":""}>${ROLE_LABEL[x]}</option>`).join("")}</select></td><td class="l"><button class="linkbtn" data-rqok="${r.id}">Approve</button> · <button class="linkbtn" data-rqno="${r.id}">Decline</button></td></tr>`).join("")}</tbody></table></div>`:`<p class="note">No requests waiting. Visitors can ask for a login from the Sign in page.</p>`;
 }
 $("#rq-list").addEventListener("click",async e=>{
   const b=e.target.closest("[data-rqok],[data-rqno]");if(!b)return;const st=$("#rq-astatus");
@@ -777,11 +804,200 @@ const slug=s=>String(s).toLowerCase().replace(/[^a-z0-9-]/g,"-").replace(/-+/g,"
 $("#nt-name").addEventListener("input",()=>{if(!$("#nt-id").dataset.touched)$("#nt-id").value=slug($("#nt-name").value);$("#nt-preview").textContent=location.origin+"/"+(slug($("#nt-id").value)||"web-name");});
 $("#nt-id").addEventListener("input",()=>{$("#nt-id").dataset.touched="1";$("#nt-preview").textContent=location.origin+"/"+(slug($("#nt-id").value)||"web-name");});
 
+// ================= AI (coaches and admins only) =================
+const AI_OFF="AI is turned off for this site. Add ANTHROPIC_API_KEY in Cloudflare (Worker > Settings > Variables and Secrets) to turn it on.";
+const notSetUp=e=>/ai_reports|ai_ok|live/.test((e&&e.message)||"")?"The AI tools aren't set up yet. Run supabase/007_coach_ai.sql in Supabase.":errText(e);
+const r3=x=>typeof x==="number"&&isFinite(x)&&!Number.isInteger(x)?+x.toFixed(3):x;
+const pickNums=(o,ks)=>o?Object.fromEntries(ks.filter(k=>o[k]!=null).map(k=>[k,r3(o[k])])):null;
+function availOn(pid,dateStr){const l=lastOuting(pid);if(!l)return {available:true,last_outing:null};const d=new Date(l.date+"T12:00"),free=new Date(d);free.setDate(d.getDate()+restDays(l.pc)+1);
+  return {available:new Date(dateStr+"T12:00")>=free,last_outing:{date:l.date,pitches:l.pc,outside_team:l.outside},rested_from:free.toISOString().slice(0,10)};}
+function teamContext(){return {team:S.team.name,league:S.team.league||"",season:S.team.season||"",innings_per_game:inn(),daily_pitch_limit:S.team.pitchMax,rest_rules:restTiers().map(([a,b])=>`${a}+ pitches: ${b} days rest`)};}
+async function playerContext(pid){
+  const p=S.players.find(x=>x.id===pid),all=playerLines(pid,true),team=playerLines(pid,false);
+  const BK=["g","pa","ab","r","h","d","t","hr","rbi","bb","so","hbp","sb","avg","obp","slg","ops"],PK=["g","outs","pc","h","r","er","bb","so","era","whip"];
+  const [notes,metrics,prev]=await Promise.all([
+    sb.from("player_notes").select("topic,body,created_at").eq("player_id",pid).order("created_at",{ascending:false}).limit(25),
+    sb.from("player_metrics").select("metric,unit,value,date,note").eq("player_id",pid).order("date"),
+    sb.from("ai_reports").select("output,created_at").eq("player_id",pid).eq("kind","player").order("created_at",{ascending:false}).limit(1)]);
+  return {
+    ...teamContext(),today:today(),
+    player:{first_name:p.name,jersey:p.num},
+    batting_team_games:pickNums(aggBat(team),BK),batting_all_games:pickNums(aggBat(all),BK),
+    pitching_all_games:pickNums(aggPit(all),PK),fielding_all_games:pickNums(aggFld(all),["g","po","a","e","pct"]),
+    pitching_status_today:availOn(pid,today()),
+    game_log:all.slice(-20).map(r=>({date:r.date,game:r.label,outside_team:r.kind==="outside",result:r.res||null,batting:r.bat||null,pitching:r.pit?{...r.pit,ip:outsToIp(+r.pit.outs||0)}:null,fielding:r.fld||null})),
+    measurements:(metrics.data||[]).map(m=>({metric:m.metric,unit:m.unit,value:+m.value,date:m.date,note:m.note||undefined})),
+    coach_notes:(notes.data||[]).map(n=>({date:n.created_at.slice(0,10),topic:n.topic,note:n.body})),
+    previous_report:prev.data&&prev.data[0]?{date:prev.data[0].created_at.slice(0,10),summary:prev.data[0].output.summary,focus:(prev.data[0].output.focus||[]).map(f=>f.title)}:null};
+}
+const COACH_RULES=`Rules: Base every point on the data or images provided and cite numbers where you can. Say plainly when there is too little data to judge. This is a young athlete, so be specific, encouraging, and constructive. Never comment on body shape, weight, or appearance, and make no medical or injury claims. Respect the team's pitch-count limits and rest rules; never suggest exceeding them. Drills must be safe, age-appropriate, and doable at a normal practice.`;
+async function saveReport(row){return (await q(sb.from("ai_reports").insert({team_id:TEAM.id,by_name:me.name||me.email,...row}).select()))[0];}
+const li=a=>(a||[]).filter(Boolean);
+function reportHtml(r){
+  const o=r.output||{},when=new Date(r.created_at).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"});
+  const kind={player:"Report",clip:"Clip review",gameday:"Game plan"}[r.kind]||"AI";
+  const focus=li(o.focus).length?`<h5>Work on</h5><ul>${li(o.focus).map(f=>`<li><b>${esc(f.title)}</b>. ${esc(f.why||"")}${f.drill?`<br><span class="note">Drill: ${esc(f.drill)}</span>`:""}</li>`).join("")}</ul>`:"";
+  let body="";
+  if(r.kind==="clip"){
+    body=`<div class="sum">${esc(o.what_it_shows||"")}${o.focus_area?` <span class="note">(${esc(o.focus_area)})</span>`:""}</div>
+      ${li(o.positives).length?`<h5>Doing well</h5><ul>${li(o.positives).map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}
+      ${li(o.observations).length?`<h5>What the frames show</h5><ul>${li(o.observations).map(x=>`<li>Frame ${esc(x.frame)}: ${esc(x.note)}</li>`).join("")}</ul>`:""}
+      ${focus}<div class="note">Confidence: ${esc(o.confidence||"unknown")}${o.caveats?`. ${esc(o.caveats)}`:""}</div>`;
+  }else{
+    body=`<div class="sum">${esc(o.summary||"")}</div>
+      ${li(o.strengths).length?`<h5>Strengths</h5><ul>${li(o.strengths).map(s=>`<li><b>${esc(s.title)}</b>. ${esc(s.detail||"")}</li>`).join("")}</ul>`:""}
+      ${focus}
+      ${li(o.watch).length?`<h5>Keep an eye on</h5><ul>${li(o.watch).map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}
+      ${o.changes?`<h5>Since last report</h5><div>${esc(o.changes)}</div>`:""}
+      ${o.data_note?`<div class="note">${esc(o.data_note)}</div>`:""}`;
+  }
+  return `<div class="ai-card"><div class="meta"><span class="ai-kind">${kind}</span><span>${esc(r.by_name||"Coach")}</span><span>${esc(when)}</span><button class="linkbtn" data-aidel="${r.id}">Delete</button></div>${body}</div>`;
+}
+async function renderReports(pid){
+  const box=$("#ai-reports");
+  const {data,error}=await sb.from("ai_reports").select("*").eq("player_id",pid).order("created_at",{ascending:false}).limit(20);
+  if(error){box.innerHTML=`<p class="note">${esc(notSetUp(error))}</p>`;return;}
+  box.innerHTML=data.map(reportHtml).join("")||`<p class="note">No AI reports yet.</p>`;
+}
+let pendingAiDel=null;
+document.addEventListener("click",async e=>{
+  const d=e.target.closest("[data-aidel]");if(!d)return;
+  if(pendingAiDel!==d.dataset.aidel){pendingAiDel=d.dataset.aidel;d.textContent="Tap again to delete";return;}
+  pendingAiDel=null;try{await q(sb.from("ai_reports").delete().eq("id",d.dataset.aidel));d.closest(".ai-card").remove();}catch(err){}
+});
+$("#ai-run").onclick=async()=>{
+  const st=$("#ai-status"),btn=$("#ai-run");if(!aiEnabled){setStatus(st,AI_OFF,"err");return;}
+  btn.disabled=true;setStatus(st,"Writing the report. This usually takes 20–40 seconds.");
+  try{
+    const ctx=await playerContext(curPlayer);
+    const out=await ai(`You are an experienced youth baseball coach and player-development specialist helping a volunteer coaching staff. Below is everything the staff has recorded for one player. Write a short development report for the coaches.
+${COACH_RULES}
+Return ONLY JSON with this shape: {"summary":"2-3 sentences","strengths":[{"title":"","detail":""}],"focus":[{"title":"","why":"","drill":""}],"watch":[""],"changes":"what changed since the previous report, or null","data_note":"one sentence on how much data this is based on"}. At most 3 strengths, 3 focus items, and 3 watch items.
+
+DATA:
+${JSON.stringify(ctx)}`);
+    if(!out||!out.summary)throw new Error("The AI's answer was incomplete. Try again.");
+    await saveReport({kind:"player",player_id:curPlayer,output:out});
+    setStatus(st,"");renderReports(curPlayer);logAct(`AI report for ${(S.players.find(x=>x.id===curPlayer)||{}).name}`);
+  }catch(e){setStatus(st,notSetUp(e),"err");}
+  finally{btn.disabled=false;}
+};
+$("#pl-aiok").addEventListener("change",async e=>{
+  const p=S.players.find(x=>x.id===curPlayer),v=e.target.checked;
+  try{await q(sb.from("players").update({ai_ok:v}).eq("id",p.id));p.ai_ok=v;setStatus($("#ai-status"),v?`AI review of ${p.name}'s photos and video is on.`:`AI review of ${p.name}'s photos and video is off.`,"ok");}
+  catch(err){e.target.checked=!v;setStatus($("#ai-status"),notSetUp(err),"err");}
+});
+
+// ---- clip and photo review ----
+const aiSheet=document.createElement("div");aiSheet.className="sheet-ov";aiSheet.hidden=true;
+aiSheet.innerHTML=`<div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="air-title"><h2 id="air-title">AI review</h2><div id="air-body"></div></div>`;
+document.body.appendChild(aiSheet);
+aiSheet.addEventListener("click",e=>{if(e.target===aiSheet&&!aiBusy)aiSheet.hidden=true;});
+let aiBusy=false,aiMedia=null;
+function openAiReview(m){
+  aiMedia=m;const tagged=(m.players||[]).map(id=>S.players.find(p=>p.id===id)).filter(Boolean);
+  const missing=tagged.filter(p=>!p.ai_ok);
+  $("#air-body").innerHTML=missing.length?`<p>Before AI can look at this ${m.kind}, turn on <b>Family has OK'd AI review</b> on ${missing.map(p=>`<a href="#player-${p.id}">${esc(p.name)}'s page</a>`).join(", ")}. Everyone tagged in it needs it.</p><div class="row"><button type="button" data-air="close">Close</button></div>`:
+   `<div class="row"><label class="f">Player<select id="air-player">${tagged.map(p=>`<option value="${p.id}" ${p.id===curPlayer?"selected":""}>#${p.num} ${esc(p.name)}</option>`).join("")}</select></label>
+    <label class="f">Look at<select id="air-focus"><option>Hitting</option><option>Pitching</option><option>Fielding</option><option>Baserunning</option><option>General</option></select></label></div>
+    <p class="note">${m.kind==="video"?"The site takes about 10 still frames from the clip and sends them, with this player's recent stats and notes, for review.":"The photo is sent with this player's recent stats and notes for review."} Treat the result as a second set of eyes, not a verdict.</p>
+    <span class="status" id="air-status"></span><div id="air-result"></div>
+    <div class="row"><button class="primary big" type="button" data-air="run" style="flex:1">Review it</button><button type="button" data-air="close">Close</button></div>`;
+  aiSheet.hidden=false;const b=aiSheet.querySelector("button");if(b)b.focus();
+}
+async function mediaBlob(m){const {data,error}=await sb.storage.from("media").download(m.path);if(error)throw new Error("Couldn't load that file.");return data;}
+async function videoFrames(blob,count=10,maxW=768){
+  const url=URL.createObjectURL(blob),v=document.createElement("video");v.muted=true;v.playsInline=true;v.preload="auto";v.src=url;
+  await new Promise((res,rej)=>{v.onloadedmetadata=res;v.onerror=()=>rej(new Error("This browser can't open that video. Try a phone or Chrome."));setTimeout(()=>rej(new Error("The video took too long to open.")),30000);});
+  const dur=v.duration;if(!isFinite(dur)||dur<=0)throw new Error("Couldn't read the video's length.");
+  const n=Math.max(3,Math.min(count,Math.round(dur*4))),times=Array.from({length:n},(_,i)=>dur*(0.03+0.94*i/(n-1)));
+  const s=Math.min(1,maxW/(v.videoWidth||maxW)),c=document.createElement("canvas");c.width=Math.round((v.videoWidth||maxW)*s);c.height=Math.round((v.videoHeight||maxW*.56)*s);const cx=c.getContext("2d");
+  const out=[];
+  for(const t of times){v.currentTime=t;await new Promise((res,rej)=>{const to=setTimeout(()=>rej(new Error("The video wouldn't skip to a frame.")),10000);v.onseeked=()=>{clearTimeout(to);res();};});
+    cx.drawImage(v,0,0,c.width,c.height);const b=await new Promise(r=>c.toBlob(r,"image/jpeg",.8));out.push({t,b64:await blobToB64(b),url:URL.createObjectURL(b)});}
+  URL.revokeObjectURL(url);return out;
+}
+async function runAiReview(){
+  const st=$("#air-status"),m=aiMedia,pid=$("#air-player").value,focus=$("#air-focus").value,p=S.players.find(x=>x.id===pid);
+  if(!aiEnabled){setStatus(st,AI_OFF,"err");return;}
+  aiBusy=true;aiSheet.querySelectorAll("button").forEach(b=>b.disabled=true);
+  try{
+    setStatus(st,m.kind==="video"?"Pulling frames from the clip…":"Loading the photo…");
+    const blob=await mediaBlob(m);
+    const frames=m.kind==="video"?await videoFrames(blob):await (async()=>{const b=await resizeImage(blob,1280,.85);return [{t:null,b64:await blobToB64(b),url:URL.createObjectURL(b)}];})();
+    setStatus(st,"Reviewing. This usually takes 20–60 seconds.");
+    const ctx=await playerContext(pid);
+    const brief={...teamContext(),player:ctx.player,batting:ctx.batting_all_games,pitching:ctx.pitching_all_games,recent_games:ctx.game_log.slice(-5),
+      coach_notes_on_topic:ctx.coach_notes.filter(n=>n.topic===focus.toLowerCase()||n.topic==="general").slice(0,6),caption:m.caption||""};
+    const out=await aiImages(`You are an experienced youth baseball coach reviewing ${m.kind==="video"?`${frames.length} still frames taken in order from a short video`:"a photo"} of one player, #${p.num} ${p.name}. Focus area: ${focus}. Other people may appear; comment only on this player.
+Only describe what is actually visible. If the images don't show the motion clearly (camera angle, blur, player too small, a different activity), say so and set confidence to low.
+${COACH_RULES}
+Return ONLY JSON with this shape: {"what_it_shows":"one sentence","positives":[""],"observations":[{"frame":1,"note":""}],"focus":[{"title":"","why":"","drill":""}],"confidence":"low|medium|high","caveats":"one sentence"}. At most 3 positives, 6 observations, and 2 focus items.${m.kind==="video"?"":" Use frame 1 for the photo."}
+
+PLAYER CONTEXT:
+${JSON.stringify(brief)}`,frames.map((f,i)=>({data:f.b64,media_type:"image/jpeg",label:m.kind==="video"?`Frame ${i+1} (${f.t.toFixed(1)}s)`:"Frame 1"})));
+    if(!out||!out.what_it_shows)throw new Error("The AI's answer was incomplete. Try again.");
+    out.focus_area=focus;
+    const saved=await saveReport({kind:"clip",player_id:pid,media_id:m.id,output:out});
+    setStatus(st,`Saved to ${p.name}'s AI reports.`,"ok");
+    $("#air-result").innerHTML=`${frames.length>1?`<div class="frames">${frames.map((f,i)=>`<figure><img src="${f.url}" alt="Frame ${i+1}"><figcaption>Frame ${i+1}</figcaption></figure>`).join("")}</div>`:""}${reportHtml(saved)}`;
+    logAct(`AI clip review for ${p.name}`);
+    if(curView==="player"&&curPlayer===pid)renderReports(pid);
+  }catch(e){setStatus(st,notSetUp(e),"err");}
+  finally{aiBusy=false;aiSheet.querySelectorAll("button").forEach(b=>b.disabled=false);}
+}
+aiSheet.addEventListener("click",e=>{const b=e.target.closest("[data-air]");if(!b)return;if(b.dataset.air==="close"){if(!aiBusy)aiSheet.hidden=true;}else runAiReview();});
+document.addEventListener("click",e=>{const b=e.target.closest("[data-mai]");if(!b)return;const m=mediaById[b.dataset.mai];if(m)openAiReview(m);});
+
+// ---- game-day helper ----
+let gdPlan=null;
+$("#gd-run").onclick=async()=>{
+  const out=$("#gd-out"),g=curGame();
+  if(!aiEnabled){out.innerHTML=`<p class="status err">${esc(AI_OFF)}</p>`;return;}
+  const ps=activeLineup();if(!g||ps.length<2){out.innerHTML=`<p class="status err">Pick the game and check at least two players first.</p>`;return;}
+  $("#gd-run").disabled=true;out.innerHTML=`<p class="status">Planning the lineup and pitching. This usually takes 20–40 seconds.</p>`;
+  try{
+    const players=ps.map(p=>{const all=playerLines(p.id,true),team=playerLines(p.id,false),last5=team.slice(-5);
+      return {jersey:p.num,first_name:p.name,
+        batting_season:pickNums(aggBat(team),["g","pa","ab","h","d","t","hr","bb","so","hbp","sb","avg","obp","slg"]),
+        batting_last5:pickNums(aggBat(last5),["g","pa","ab","h","bb","so","avg","obp"]),
+        pitching_season:pickNums(aggPit(all),["g","outs","pc","bb","so","era","whip"]),
+        fielding_errors:(aggFld(team)||{}).e||0,
+        pitching_on_game_day:availOn(p.id,g.date)};});
+    const past=S.games.filter(x=>x.id!==g.id&&x.opp===g.opp&&x.us!=null).map(x=>({date:x.date,us:x.us,them:x.them}));
+    const res=await ai(`You are helping a youth baseball coach plan an upcoming game. Suggest a batting order using every player listed (continuous batting order), and a pitching plan.
+For pitching, use only players whose pitching_on_game_day.available is true, give each a pitch budget at or under the daily limit, and think about rest days for the next few games. Explain each choice briefly from the numbers; say when samples are small.
+${COACH_RULES}
+Return ONLY JSON with this shape: {"batting_order":[{"jersey":0,"reason":""}],"pitching":[{"jersey":0,"role":"starter|relief","pitch_budget":0,"reason":""}],"notes":[""]}. At most 3 notes.
+
+GAME: ${JSON.stringify({date:g.date,opponent:g.opp,home:g.home,earlier_games_vs_opponent:past})}
+TEAM: ${JSON.stringify(teamContext())}
+PLAYERS: ${JSON.stringify(players)}`);
+    const byNum=n=>ps.find(p=>p.num===+n);
+    const order=[],seen=new Set();for(const b of res.batting_order||[]){const p=byNum(b.jersey);if(p&&!seen.has(p.id)){seen.add(p.id);order.push({p,reason:b.reason||""});}}
+    for(const p of ps)if(!seen.has(p.id))order.push({p,reason:"Not placed by the AI; added at the end."});
+    const pitching=(res.pitching||[]).map(x=>{const p=byNum(x.jersey);if(!p)return null;const a=availOn(p.id,g.date);return {p,role:x.role,budget:Math.min(+x.pitch_budget||0,S.team.pitchMax),reason:x.reason||"",ok:a.available,rested:a.rested_from};}).filter(Boolean);
+    gdPlan={order:order.map(o=>o.p.id)};
+    out.innerHTML=`<div class="ai-card"><div class="meta"><span class="ai-kind">Game plan</span><span>${dParts(g.date).m} ${dParts(g.date).d} ${g.home?"vs":"at"} ${esc(g.opp)}</span></div>
+      <h5>Batting order</h5><ol class="gd-list">${order.map(o=>`<li><b>#${o.p.num} ${esc(o.p.name)}</b>. <span class="note">${esc(o.reason)}</span></li>`).join("")}</ol>
+      <h5>Pitching</h5><ul>${pitching.map(x=>`<li>${x.ok?"":`<span class="flag">Not rested until ${esc(fmtDay(x.rested))}, so don't use. </span>`}<b>#${x.p.num} ${esc(x.p.name)}</b>, ${esc(x.role||"")}, up to ${x.budget} pitches. <span class="note">${esc(x.reason)}</span></li>`).join("")||"<li>No pitching suggestion.</li>"}</ul>
+      ${li(res.notes).length?`<h5>Notes</h5><ul>${li(res.notes).map(n=>`<li>${esc(n)}</li>`).join("")}</ul>`:""}
+      <div class="row"><button class="primary" type="button" id="gd-use">Use this batting order</button><button type="button" id="gd-close">Dismiss</button></div></div>`;
+    saveReport({kind:"gameday",game_id:g.id,output:res}).catch(()=>{});
+  }catch(e){out.innerHTML=`<p class="status err">${esc(notSetUp(e))}</p>`;}
+  finally{$("#gd-run").disabled=false;}
+};
+$("#gd-out").addEventListener("click",e=>{
+  if(e.target.id==="gd-close"){$("#gd-out").innerHTML="";gdPlan=null;}
+  if(e.target.id==="gd-use"&&gdPlan){const rest=curLineup.order.filter(id=>!gdPlan.order.includes(id));curLineup.order=[...gdPlan.order,...rest];renderLineup();rebuildTables();$("#gd-out").innerHTML=`<p class="status ok">Batting order updated. Press Save lineup to keep it.</p>`;gdPlan=null;}
+});
+
 // ---------- routing ----------
 const VIEWS=["schedule","live","stats","roster","photos","scorebook","sheet","admin","signin","account","teams","player"];
 function route(){
   let v=location.hash.slice(1);
   if(v.startsWith("player-")){curPlayer=v.slice(7);v="player";}
+  if(v==="player"&&TEAM&&!isCoach)v=session?"roster":"signin";
   if(!VIEWS.includes(v))v="schedule";
   if(!TEAM)v="teams";
   else{
@@ -978,8 +1194,16 @@ async function fetchPlays(){
     if(gid!==lvGame)return;lvEvents=rows.map(r=>({id:r.id,t:r.t,...r.ev}));$("#lv-note").hidden=true;renderLive();}
   catch(e){flash("Live scores aren't loading: "+errText(e));}
 }
+// Visitors read a small live summary saved on the game (line score, inning, outs), not the plays.
+let lvLive=null,lvPoll=null;
+async function fetchLive(){const gid=lvGame;const {data,error}=await sb.from("games").select("live").eq("id",gid);if(gid!==lvGame)return;if(!error){lvLive=(data[0]||{}).live||null;$("#lv-note").hidden=true;renderLive();}}
+let liveTimer=null;
+function pushLive(){clearTimeout(liveTimer);liveTimer=setTimeout(async()=>{const g=S.games.find(x=>x.id===lvGame);if(!g)return;const st=replay(lvEvents,g);
+  const live={started:lvEvents.length>0,ended:st.ended,inning:st.inning,top:st.top,outs:st.outs,line:st.line,us:st.us,them:st.them,at:Date.now()};
+  try{await sb.from("games").update({live}).eq("id",g.id);g.live=live;}catch(e){}},400);}
 function subscribeGame(gid){
   if(!gid){flash("Add a game to the schedule first.");return;}
+  if(!canEdit){clearInterval(lvPoll);lvGame=gid;lvLive=null;renderLive();fetchLive();lvPoll=setInterval(()=>{if(location.hash==="#live"&&!document.hidden)fetchLive();},20000);return;}
   if(gid===lvGame&&lvChan)return;
   if(lvChan){sb.removeChannel(lvChan);lvChan=null;}
   lvGame=gid;lvEvents=[];renderLive();fetchPlays();
@@ -987,28 +1211,32 @@ function subscribeGame(gid){
     .on("postgres_changes",{event:"DELETE",schema:"public",table:"plays"},()=>{clearTimeout(lvRefetch);lvRefetch=setTimeout(fetchPlays,150);})
     .subscribe();
 }
-document.addEventListener("visibilitychange",()=>{if(!document.hidden&&lvGame&&location.hash==="#live")fetchPlays();});
+document.addEventListener("visibilitychange",()=>{if(!document.hidden&&lvGame&&location.hash==="#live")(canEdit?fetchPlays:fetchLive)();});
 async function addEv(o){
   if(!canEdit)return;
   const t=Date.now(),id=uuid(),local={id,t,...o};
   lvEvents=[...lvEvents,local];renderLive();
-  try{await q(sb.from("plays").insert({id,game_id:lvGame,team_id:TEAM.id,t,ev:o}));}
+  try{await q(sb.from("plays").insert({id,game_id:lvGame,team_id:TEAM.id,t,ev:o}));pushLive();}
   catch(e){lvEvents=lvEvents.filter(x=>x.id!==id);renderLive();flash("That tap didn't save. "+errText(e)+" Tap it again.");}
 }
 function flash(t){const n=$("#lv-note");n.hidden=false;n.textContent=t;}
 async function undo(){const last=lvEvents[lvEvents.length-1];if(!last)return;
   lvEvents=lvEvents.slice(0,-1);renderLive();
-  try{await q(sb.from("plays").delete().eq("id",last.id));}catch(e){flash("Couldn't undo. "+errText(e));fetchPlays();}}
+  try{await q(sb.from("plays").delete().eq("id",last.id));pushLive();}catch(e){flash("Couldn't undo. "+errText(e));fetchPlays();}}
 
 function restInfo(pc){const max=S.team.pitchMax||85,d=restDays(pc),top=restTiers()[0][1];return {d,max,cls:pc>=max-10?"w2":d>=top-1&&d>0?"w1":""};}
 function renderLive(){
   const g=S.games.find(x=>x.id===lvGame);if(!g){$("#lv-board").innerHTML="";$("#lv-ctrl").innerHTML="";$("#lv-log").innerHTML="";return;}
-  const st=lvState=replay(lvEvents,g),n=Math.max(inn(),st.inning),awayUs=!g.home;
-  const curHalf=lvEvents.length?(st.ended?1e9:2*(st.inning-1)+(st.top?0:1)):-1;
+  const L=lvLive||{};
+  const st=canEdit?(lvState=replay(lvEvents,g)):{inning:L.inning||1,top:L.top!==false,outs:L.outs||0,line:L.line||{us:[],them:[]},us:L.us||0,them:L.them||0,ended:!!L.ended,bases:[null,null,null],b:0,s:0,log:[],usBat:(L.top!==false)!==!!g.home};
+  const started=canEdit?lvEvents.length>0:!!L.started;
+  const n=Math.max(inn(),st.inning),awayUs=!g.home;
+  const curHalf=started?(st.ended?1e9:2*(st.inning-1)+(st.top?0:1)):-1;
   const rowFor=(side,name)=>{const isAway=(side==="us")===awayUs;return `<tr><td class="l">${esc(name)}</td>${Array.from({length:n},(_,i)=>{const h=2*i+(isAway?0:1),v=st.line[side][i],isCur=h===curHalf;return `<td class="${isCur?"cur":""}">${v!=null?v:(h<=curHalf?"0":"")}</td>`}).join("")}<td>${st[side]}</td></tr>`;};
   const away=awayUs?["us",S.team.name]:["them",g.opp],home=awayUs?["them",g.opp]:["us",S.team.name],b=st.bases;
-  $("#lv-board").innerHTML=`<div class="board"><div class="tbl-wrap" style="border:0"><table><thead><tr><th class="l" style="text-align:left">${lvEvents.length?(st.ended?"Final":"Live"):"Not started"}</th>${Array.from({length:n},(_,i)=>`<th>${i+1}</th>`).join("")}<th>R</th></tr></thead><tbody>${rowFor(...away)}${rowFor(...home)}</tbody></table></div>
-   ${st.ended||!lvEvents.length?"":`<div class="sit"><span class="big">${st.top?"Top":"Bottom"} ${st.inning}</span><span>Outs <span class="dots">${[0,1].map(i=>`<i class="${st.outs>i?"on":""}"></i>`).join("")}</span></span>${st.usBat?`<span class="mini-dia" aria-label="Runners on ${["1st","2nd","3rd"].filter((_,i)=>b[i]).join(", ")||"no bases"}"><span class="b1 ${b[0]?"on":""}"></span><span class="b2 ${b[1]?"on":""}"></span><span class="b3 ${b[2]?"on":""}"></span></span><span>${esc(S.team.name)} batting</span>`:`<span class="big">${st.b}-${st.s}</span><span>${esc(g.opp)} batting</span>`}</div>`}</div>`;
+  $("#lv-board").innerHTML=`<div class="board"><div class="tbl-wrap" style="border:0"><table><thead><tr><th class="l" style="text-align:left">${started?(st.ended?"Final":"Live"):"Not started"}</th>${Array.from({length:n},(_,i)=>`<th>${i+1}</th>`).join("")}<th>R</th></tr></thead><tbody>${rowFor(...away)}${rowFor(...home)}</tbody></table></div>
+   ${st.ended||!started?"":`<div class="sit"><span class="big">${st.top?"Top":"Bottom"} ${st.inning}</span><span>Outs <span class="dots">${[0,1].map(i=>`<i class="${st.outs>i?"on":""}"></i>`).join("")}</span></span>${st.usBat&&canEdit?`<span class="mini-dia" aria-label="Runners on ${["1st","2nd","3rd"].filter((_,i)=>b[i]).join(", ")||"no bases"}"><span class="b1 ${b[0]?"on":""}"></span><span class="b2 ${b[1]?"on":""}"></span><span class="b3 ${b[2]?"on":""}"></span></span><span>${esc(S.team.name)} batting</span>`:st.usBat?`<span>${esc(S.team.name)} batting</span>`:`${canEdit?`<span class="big">${st.b}-${st.s}</span>`:""}<span>${esc(g.opp)} batting</span>`}</div>`}</div>`;
+  if(!canEdit){$("#lv-log").innerHTML=`<li class="note">${started?"The score updates every 20 seconds. Play-by-play is shared with the coaching staff.":"Check back at game time. The score updates here live."}</li>`;$("#lv-ctrl").innerHTML="";return;}
   $("#lv-log").innerHTML=st.log.slice(-14).reverse().map(l=>`<li><span class="inn">${l.inn}</span><span>${esc(l.t)}</span></li>`).join("")||`<li class="note">No plays yet.${canEdit?" Tap a button above to start.":""}</li>`;
   if(!canEdit){$("#lv-ctrl").innerHTML="";return;}
   const modeSeg=`<div class="seg" role="group" aria-label="What I'm scoring">${[["all","Everything"],["bat","Our at-bats"],["def","Pitching & fielding"]].map(([k,l])=>`<button type="button" data-mode="${k}" aria-pressed="${lvMode===k}">${l}</button>`).join("")}</div>`;
@@ -1039,7 +1267,7 @@ let sheetState=null;
 function openSheet(html){$("#lv-sheet-card").innerHTML=html;$("#lv-sheet").hidden=false;const f=$("#lv-sheet-card button");if(f)f.focus();}
 function closeSheet(){$("#lv-sheet").hidden=true;sheetState=null;}
 $("#lv-sheet").addEventListener("click",e=>{if(e.target.id==="lv-sheet")closeSheet();});
-document.addEventListener("keydown",e=>{if(e.key==="Escape"){if(!$("#lv-sheet").hidden)closeSheet();$("#lightbox").hidden=true;$("#tag-sheet").hidden=true;}});
+document.addEventListener("keydown",e=>{if(e.key==="Escape"){if(!$("#lv-sheet").hidden)closeSheet();$("#lightbox").hidden=true;$("#tag-sheet").hidden=true;if(!aiBusy)aiSheet.hidden=true;}});
 function defaultDest(r,bases,batter){
   const d={},adv={"1b":1,"2b":2,"3b":3,"hr":4,"sac":1}[r],put=(id,i,n)=>{const t=i+1+n;d[id]=t>3?"H":t;};
   if(["bb","hbp","e","fc"].includes(r)){d[batter]=1;if(bases[0]){d[bases[0]]=2;if(bases[1]){d[bases[1]]=3;if(bases[2])d[bases[2]]="H";}}bases.forEach((id,i)=>{if(id&&!(id in d))d[id]=i+1;});}
@@ -1164,13 +1392,13 @@ async function boot(){
   render();route();
   try{const r=await Promise.race([sb.auth.getSession(),new Promise((_,rej)=>setTimeout(()=>rej(new Error("slow")),5000))]);session=r.data.session;}
   catch(e){session=null;}
-  await refreshRole();render();route();loadRequests();
+  await refreshRole();if(canEdit)await loadTeamData();render();route();loadRequests();
   fetch("/api/ai").then(r=>r.ok?r.json():{enabled:false}).then(j=>{aiEnabled=!!j.enabled;renderSchedule();$("#scan-run").disabled=!(aiEnabled&&$("#scan-file").files.length);
     if(!aiEnabled)$("#scan-status").textContent="Photo reading is turned off for this site. Enter numbers in the tables below.";}).catch(()=>{});
   // Supabase can deadlock if its own calls are awaited inside this callback, so defer the work.
   sb.auth.onAuthStateChange((ev,sess)=>{
     if(ev==="INITIAL_SESSION"||ev==="TOKEN_REFRESHED"){session=sess;return;}
-    setTimeout(async()=>{session=sess;await refreshRole();render();route();loadRequests();},0);
+    setTimeout(async()=>{session=sess;await refreshRole();await loadTeamData();render();route();loadRequests();},0);
   });
 }
 boot();
