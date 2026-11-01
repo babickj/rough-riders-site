@@ -395,12 +395,13 @@
       <div class="panel">
         <h3>Tryouts</h3>
         <div id="ty-list"></div>
-        <div class="row">
+        <details id="ty-new"><summary>New tryout</summary>
+        <div class="row" style="margin-top:8px">
           <label class="f">Title<input type="text" id="ty-title" maxlength="80" placeholder="Spring tryouts"></label>
-          <label class="f">Date<input type="date" id="ty-date"></label>
+          <label class="f">First day<input type="date" id="ty-date"></label>
           <label class="f">Where<input type="text" id="ty-loc" maxlength="80"></label>
           <button type="button" class="primary" id="ty-add">Create tryout</button>
-        </div>
+        </div></details>
         <span class="status" id="ty-status"></span>
       </div>
       <div id="ty-board" class="stack"></div>

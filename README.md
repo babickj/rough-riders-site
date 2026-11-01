@@ -129,3 +129,10 @@ No database changes needed.
 1. In Supabase **SQL Editor**, run `supabase/013_player_logins.sql` once (it includes 012).
 2. The roster is now only for signed-in team members. Parents and players see it once it's posted.
 3. In **Admin > Add a person**, pick **Player** and which player they are on the roster (or **Parent** and, optionally, their player). Players and linked parents get a **My page** tab: their own stats, trends, game log, measurements, reviewed write-up, tryout result, and any coach notes marked "Share with the player".
+
+### 14. Tryout days
+Run `supabase/014_tryout_days.sql` once (after 010). On the Tryouts tab, open a tryout's board and use the tools across the top:
+- **Check-in**: kids get a tryout number the first time they check in and keep it every day. Walk-ups are added and checked in at once.
+- **Stations**: each coach picks a station (Hitting, Infield/outfield, Pitching, Catching, Running, Makeup) and taps 1 to 5 per number. Running and Catching have a stopwatch; the best time counts. Scores are saved on the phone first and upload when there's signal.
+- **Board**: hidden until an admin presses Reveal, then ranked by overall score across all coaches and days, with a flag when one coach scores well above or below the others.
+- **Setup**: hide/show scores and edit the scoring guide (what a 1, 3, and 5 look like).

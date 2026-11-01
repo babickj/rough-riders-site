@@ -379,3 +379,39 @@ body.viewing-own .coach-only.own-ok{display:block!important}
 .player-head{align-items:center}
 .mine-ty{border-left:4px solid var(--good)}
 #ad-members select+select{margin-left:6px}
+
+/* ---- tryout day ---- */
+.ty-modes button{padding:8px 12px}
+.ty-sync{font-size:13px;font-weight:600;padding:6px 10px;border-left:4px solid var(--good);background:var(--surface)}
+.ty-sync.wait{border-left-color:var(--warn)}
+.ty-sync.err{border-left-color:var(--bad);color:var(--bad)}
+.st-no{font-family:var(--f-head);font-weight:800;font-size:24px;min-width:44px;text-align:center;font-variant-numeric:tabular-nums}
+.ci-list,.st-list{display:flex;flex-direction:column}
+.ci-row{display:grid;grid-template-columns:52px 1fr auto auto;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+.ci-row small,.st-who small{display:block;color:var(--muted);font-size:12px}
+.ci-row.here .st-no{color:var(--good)}
+.st-row{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)}
+.st-who{display:flex;gap:10px;align-items:center;min-width:180px;flex:1}
+.st-in{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center}
+.st-tool{display:flex;gap:6px;align-items:center}
+.st-tool>span{font-family:var(--f-head);text-transform:uppercase;font-size:12px;letter-spacing:.06em;color:var(--muted);min-width:56px}
+.st-seg button{min-width:44px;min-height:44px;font-size:17px;font-weight:700;padding:0}
+.st-num{display:flex;flex-direction:column;font-size:12px;color:var(--muted)}
+.st-num input{width:80px;font-size:16px}
+.ty-guide{font-size:14px}
+.ty-guide ol.g135{margin:4px 0 8px;padding-left:22px}
+.g-edit{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.g-edit input{width:100%}
+.tyw{display:flex;flex-direction:column;gap:10px;align-items:stretch;background:var(--surface);border:1px solid var(--line);padding:14px;max-width:420px}
+.tyw-clock{font-family:var(--f-head);font-weight:800;font-size:64px;line-height:1;text-align:center;font-variant-numeric:tabular-nums}
+.tyw-go{min-height:96px;font-size:28px;touch-action:manipulation;user-select:none}
+.tyw-go.stop{background:var(--bad);border-color:var(--bad)}
+@media (max-width:560px){
+  .ty-modes{width:100%}.ty-modes button{flex:1;padding:8px 4px}
+  .st-in{width:100%;justify-content:space-between}
+  .st-seg button{min-width:0;flex:1}.st-tool{flex:1 1 100%}.st-seg{flex:1;display:flex}
+  .st-num{flex:1}.st-num input{width:100%}
+  .g-edit{grid-template-columns:1fr}
+  .ci-row{grid-template-columns:44px 1fr auto}
+  .ci-row .linkbtn{grid-column:3}
+}

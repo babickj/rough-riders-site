@@ -1285,7 +1285,7 @@ $("#rv-now").onclick=()=>saveReveal(new Date().toISOString(),"Roster posted");
 
 // ================= TRYOUTS =================
 let tryouts=[],curTryout=null,tyPlayers=[],tyScores=[],tyFilter="all";
-const TOOLS=[["arm","Arm"],["speed","Speed"],["fielding","Fielding"],["hitting","Hitting"],["pitching","Pitching"]];
+const TOOLS=[["arm","Arm"],["speed","Speed"],["fielding","Fielding"],["hitting","Hitting"],["pitching","Pitching"],["makeup","Makeup"]];
 const squads=()=>teams.filter(t=>t.id===TEAM.id||(TEAM.school&&t.school===TEAM.school)).sort((a,b)=>a.name.localeCompare(b.name));
 const tyName=x=>`${x.first_name} ${x.last_name}`;
 function sheet(html){let s=$("#gen-sheet");if(!s){s=document.createElement("div");s.id="gen-sheet";s.className="sheet-ov";s.innerHTML=`<div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="gen-title"></div>`;document.body.appendChild(s);
@@ -1331,46 +1331,244 @@ async function renderTryouts(){
   $("#ty-list").innerHTML=tryouts.map(t=>`<div class="ty-row"><div><b>${esc(t.title)}</b> <span class="note">${t.date?esc(fmtDay(t.date)):""}${t.location?" · "+esc(t.location):""}</span>${t.signups_open?` <span class="chip ok">Sign-ups open</span>`:""}</div>
     <div class="row"><button data-ty="board" data-id="${t.id}" class="${curTryout===t.id?"primary":""}">Open board</button><button data-ty="toggle" data-id="${t.id}">${t.signups_open?"Close sign-ups":"Open sign-ups"}</button><button data-ty="del" data-id="${t.id}">Delete</button></div></div>`).join("")||`<p class="note">No tryouts yet. Create one below; open sign-ups when you're ready for families to register.</p>`;
   if(!curTryout&&tryouts[0])curTryout=tryouts[0].id;
+  $("#ty-new").open=!tryouts.length;
   renderBoard();
 }
 const avg=a=>a.length?a.reduce((s,x)=>s+x,0)/a.length:null;
 function tyStats(x){
-  const sc=tyScores.filter(s=>s.tryout_player_id===x.id),o={n:sc.length};
+  const sc=tyScores.filter(s=>s.tryout_player_id===x.id),o={n:sc.length,coaches:new Set(sc.map(s=>s.coach_id)).size};
   for(const [k] of TOOLS)o[k]=avg(sc.map(s=>s[k]).filter(v=>v!=null));
   const t=TOOLS.map(([k])=>o[k]).filter(v=>v!=null);o.overall=t.length?avg(t):null;
   const nums=k=>sc.map(s=>s[k]).filter(v=>v!=null).map(Number);
-  o.sixty=nums("sixty").length?Math.min(...nums("sixty")):null;o.velo=nums("velo").length?Math.max(...nums("velo")):null;o.pop=nums("pop").length?Math.min(...nums("pop")):null;
+  o.sixty=nums("sixty").length?Math.min(...nums("sixty")):null;o.velo=nums("velo").length?Math.max(...nums("velo")):null;o.pop=nums("pop").length?Math.min(...nums("pop")):null;o.h2f=nums("h2f").length?Math.min(...nums("h2f")):null;
   o.notes=sc.filter(s=>s.note).map(s=>`${s.coach_name||"Coach"}: ${s.note}`);
   return o;
 }
+// ---------- tryout day: check-in, stations, stopwatch, board, setup ----------
+const TY_DEFAULT_GUIDE={
+  arm:["Loops it, can't reach the base on a line","Accurate, average carry for the position","Plus carry and accuracy, throws on a line from deep"],
+  speed:["Well below average, 60 over 7.8","Average, 60 around 7.3","Plus runner, 60 under 6.9"],
+  fielding:["Stiff hands, poor footwork, misses routine plays","Makes the routine play, sound footwork","Smooth, range both ways, makes hard plays look easy"],
+  hitting:["Late, long swing, rarely squares it up","Consistent contact, some gap power","Barrels it consistently, hard contact to all fields"],
+  pitching:["Struggles to throw strikes","Fastball for strikes plus a second pitch","Commands 2 or 3 pitches, velo above team average"],
+  makeup:["Low effort, doesn't take coaching","Works hard, listens, adjusts","Leader, hustles every rep, adjusts right away"]};
+const TY_NUMS={sixty:{l:"60 yd",u:"s",low:true,step:"0.01"},h2f:{l:"Home to 1st",u:"s",low:true,step:"0.01"},pop:{l:"Pop time",u:"s",low:true,step:"0.01"},velo:{l:"Velo",u:"mph",low:false,step:"0.1"}};
+const STATIONS=[
+  {id:"hitting",name:"Hitting",tools:["hitting"]},
+  {id:"fielding",name:"Infield / outfield",tools:["fielding","arm"]},
+  {id:"pitching",name:"Pitching",tools:["pitching"],nums:["velo"]},
+  {id:"catching",name:"Catching",tools:["arm"],nums:["pop"],timer:["pop"]},
+  {id:"running",name:"Running",tools:["speed"],nums:["sixty","h2f"],timer:["sixty","h2f"]},
+  {id:"makeup",name:"Makeup",tools:["makeup"]}];
+const toolLabel=k=>(TOOLS.find(t=>t[0]===k)||[k,k])[1];
+let tyMode=lsGet("ty-mode")||"checkin",tyStation=lsGet("ty-station")||"hitting",tyRange={from:"",to:""},tySearch="";
+const curTy=()=>tryouts.find(x=>x.id===curTryout);
+const tyGuide=t=>({...TY_DEFAULT_GUIDE,...((t&&t.rubric)||{})});
+const tyNo=x=>x.tryout_no!=null?x.tryout_no:"—";
+const hereToday=x=>(x.checked_in_days||[]).includes(today());
+
+// Scores save on the phone first and upload when there's signal, so nothing is lost at a far field.
+let tyPending=(()=>{try{return JSON.parse(localStorage.getItem("ty-pending")||"{}");}catch(e){return {};}})();
+const tySavePending=()=>lsSet("ty-pending",JSON.stringify(tyPending));
+let tyFlushing=false,tyErr="",tyFlushTimer=null;
+function myRow(xid){return tyScores.find(s=>s.tryout_player_id===xid&&s.coach_id===me.id&&s.day===today());}
+function tyScore(xid,fields){
+  const base={tryout_player_id:xid,team_id:TEAM.id,coach_id:me.id,coach_name:me.name||me.email,day:today()};
+  let r=myRow(xid);if(!r){r={...base};tyScores.push(r);}Object.assign(r,fields);
+  const k=`${xid}|${me.id}|${base.day}`;
+  tyPending[k]={...(tyPending[k]||base),...fields,updated_at:new Date().toISOString()};tySavePending();tySyncLine();
+  clearTimeout(tyFlushTimer);tyFlushTimer=setTimeout(tyFlush,250);
+}
+async function tyFlush(){
+  if(tyFlushing||!session)return;const keys=Object.keys(tyPending);if(!keys.length){tySyncLine();return;}
+  tyFlushing=true;
+  try{for(const k of keys){const row=tyPending[k];
+      const {error}=await sb.from("tryout_scores").upsert(row,{onConflict:"tryout_player_id,coach_id,day"});
+      if(error){tyErr=/day|makeup|h2f|column|constraint|conflict/i.test(error.message||"")?"Scores are saved on this phone but can't upload until supabase/014_tryout_days.sql is run in Supabase.":"";break;}
+      tyErr="";if(tyPending[k]===row)delete tyPending[k];}}
+  catch(e){}
+  finally{tyFlushing=false;tySavePending();tySyncLine();}
+}
+function tySyncLine(){const el=$("#ty-sync");if(!el)return;const n=Object.keys(tyPending).length;
+  el.className="ty-sync "+(tyErr?"err":n?"wait":"ok");
+  el.textContent=tyErr||(n?`${n} score${n>1?"s":""} saved on this phone, uploading when there's signal…`:"All scores saved.");}
+addEventListener("online",tyFlush);setInterval(()=>{if(Object.keys(tyPending).length)tyFlush();},15000);
+
 async function renderBoard(){
-  const box=$("#ty-board");const t=tryouts.find(x=>x.id===curTryout);if(!t){box.innerHTML="";return;}
-  const [a,b]=await Promise.all([sb.from("tryout_players").select("*").eq("tryout_id",t.id).order("last_name"),sb.from("tryout_scores").select("*").eq("team_id",TEAM.id)]);
+  const box=$("#ty-board");const t=curTy();if(!t){box.innerHTML="";return;}
+  const a=await sb.from("tryout_players").select("*").eq("tryout_id",t.id).order("last_name");
   if(a.error){box.innerHTML=`<p class="status err">${esc(/tryout/.test(a.error.message)?"Tryouts aren't set up yet. Run supabase/010_hs_tools.sql in Supabase.":errText(a.error))}</p>`;return;}
-  tyPlayers=a.data;tyScores=b.data||[];
+  tyPlayers=a.data;const ids=new Set(tyPlayers.map(x=>x.id));
+  const b=await sb.from("tryout_scores").select("*").eq("team_id",TEAM.id);
+  tyScores=(b.data||[]).filter(s=>ids.has(s.tryout_player_id)).map(s=>({...s,day:s.day||today()}));
+  // Keep scores still waiting to upload on screen.
+  for(const p of Object.values(tyPending)){if(!ids.has(p.tryout_player_id))continue;let r=tyScores.find(s=>s.tryout_player_id===p.tryout_player_id&&s.coach_id===p.coach_id&&s.day===p.day);if(!r){r={};tyScores.push(r);}Object.assign(r,p);}
+  renderTyBody();tyFlush();
+}
+function renderTyBody(){
+  const box=$("#ty-board"),t=curTy();if(!t)return;
+  const modes=[["checkin","Check-in"],["stations","Stations"],["board","Board"],["setup","Setup"]];
+  const here=tyPlayers.filter(hereToday).length;
+  let body="";
+  if(tyMode==="checkin")body=tyCheckinHtml();else if(tyMode==="stations")body=tyStationHtml(t);else if(tyMode==="setup")body=tySetupHtml(t);else body=tyBoardHtml(t);
+  box.innerHTML=`<div class="panel stack" style="gap:12px">
+    <div class="sec-head" style="margin:0"><h3>${esc(t.title)} · ${tyPlayers.length} signed up · ${here} here today</h3>
+      <div class="seg ty-modes" role="group" aria-label="Tryout tools">${modes.map(([k,l])=>`<button type="button" data-tymode="${k}" aria-pressed="${tyMode===k}">${l}</button>`).join("")}</div></div>
+    <div id="ty-sync" class="ty-sync"></div>
+    ${body}</div>`;
+  tySyncLine();
+  if(tyMode==="stations")tyTimerWire();
+}
+
+// Check-in: hand out numbers kids pin on their shirts; each day they arrive counts as a day attended.
+function tyCheckinHtml(){
+  const s=tySearch.trim().toLowerCase();
+  const list=tyPlayers.filter(x=>!s||tyName(x).toLowerCase().includes(s)||String(x.tryout_no)===s).sort((a,b)=>a.last_name.localeCompare(b.last_name));
+  return `<p class="note">Check kids in as they arrive. The first time, each one gets a tryout number to pin on their shirt; they keep it every day. Coaches score by number.</p>
+    <label class="f">Find a player<input type="search" id="ty-find" value="${esc(tySearch)}" placeholder="Name or number" autocomplete="off"></label>
+    <div class="ci-list">${list.map(x=>`<div class="ci-row ${hereToday(x)?"here":""}"><b class="st-no">${tyNo(x)}</b><div><b>${esc(x.last_name)}, ${esc(x.first_name)}</b><small>${esc([x.grade?"Grade "+x.grade:"",x.positions].filter(Boolean).join(" · "))}${(x.checked_in_days||[]).length?` · day ${(x.checked_in_days||[]).length}`:""}</small></div>
+      ${hereToday(x)?`<span class="chip ok">Here today</span><button type="button" class="linkbtn" data-ci-undo="${x.id}">Undo</button>`:`<button type="button" class="primary" data-ci="${x.id}">Check in</button>`}</div>`).join("")||`<p class="note">${s?"No one matches.":"No one signed up yet. Add walk-ups below."}</p>`}</div>
+    <form class="row" id="ty-walk"><label class="f">First name<input id="tyw-first" maxlength="40"></label><label class="f">Last name<input id="tyw-last" maxlength="40"></label><label class="f">Grade<input id="tyw-grade" maxlength="5" style="width:60px"></label><label class="f">Positions<input id="tyw-pos" maxlength="60"></label><button type="submit">Add walk-up and check in</button><span class="status" id="tyw-status"></span></form>`;
+}
+const nextNo=()=>tyPlayers.reduce((m,x)=>Math.max(m,+x.tryout_no||0),0)+1;
+async function tyCheckIn(x,undo){
+  const days=new Set(x.checked_in_days||[]);undo?days.delete(today()):days.add(today());
+  const upd={checked_in_days:[...days].sort()};if(!undo&&x.tryout_no==null)upd.tryout_no=nextNo();
+  const {error}=await sb.from("tryout_players").update(upd).eq("id",x.id);
+  if(error){alertBoard(/tryout_no|checked_in/.test(error.message||"")?"Check-in needs supabase/014_tryout_days.sql run in Supabase first.":errText(error));return;}
+  Object.assign(x,upd);renderTyBody();
+}
+
+// Stations: a coach picks their station and taps 1 to 5 for each kid going through.
+function stationKids(){
+  const anyHere=tyPlayers.some(hereToday),f=+tyRange.from||0,to=+tyRange.to||Infinity;
+  return tyPlayers.filter(x=>(!anyHere||hereToday(x))&&(x.tryout_no==null?!f&&to===Infinity:x.tryout_no>=f&&x.tryout_no<=to))
+    .sort((a,b)=>(a.tryout_no??1e9)-(b.tryout_no??1e9)||a.last_name.localeCompare(b.last_name));
+}
+function tyStationHtml(t){
+  const st=STATIONS.find(s=>s.id===tyStation)||STATIONS[0],g=tyGuide(t),kids=stationKids();
+  const guide=`<details class="ty-guide"><summary>Scoring guide</summary>${st.tools.map(k=>`<div><b>${toolLabel(k)}</b><ol class="g135"><li value="1">${esc(g[k][0])}</li><li value="3">${esc(g[k][1])}</li><li value="5">${esc(g[k][2])}</li></ol></div>`).join("")}</details>`;
+  const timer=st.timer?`<div class="tyw">
+      ${st.timer.length>1?`<div class="seg" role="group">${st.timer.map(k=>`<button type="button" data-twev="${k}" aria-pressed="${tyT.ev===k}">${TY_NUMS[k].l}</button>`).join("")}</div>`:""}
+      <label class="f">${st.id==="catching"?"Catcher":"Runner"}<select id="tyw-who">${kids.map(x=>`<option value="${x.id}" ${tyT.who===x.id?"selected":""}>#${tyNo(x)} ${esc(x.first_name)} ${esc(x.last_name.charAt(0))}.</option>`).join("")}</select></label>
+      <div class="tyw-clock" id="tyw-clock">${tyT.run?"…":"0.00"}</div>
+      <button type="button" class="primary tyw-go ${tyT.run?"stop":""}" id="tyw-go">${tyT.run?"Stop":"Start"}</button>
+      <div id="tyw-last" class="note">${tyT.lastHtml||"Tap Start when they go, Stop when they finish. The best time counts. It moves to the next player after each time."}</div></div>`:"";
+  return `<div class="row st-pick"><label class="f">My station<select id="ty-station">${STATIONS.map(s=>`<option value="${s.id}" ${s.id===st.id?"selected":""}>${s.name}</option>`).join("")}</select></label>
+      <div class="f">Numbers (optional)<span class="row" style="gap:6px;flex-wrap:nowrap"><input type="number" id="ty-from" value="${esc(tyRange.from)}" style="width:70px" inputmode="numeric" aria-label="From number" placeholder="From"><span>to</span><input type="number" id="ty-to" value="${esc(tyRange.to)}" style="width:70px" inputmode="numeric" aria-label="To number" placeholder="To"></span></div></div>
+    ${guide}${timer}
+    <p class="note">${tyPlayers.some(hereToday)?"Showing kids checked in today.":"No one is checked in today, so everyone is listed."} Your scores are for today (${esc(fmtDay(today()))}); other coaches can't change them.</p>
+    <div class="st-list">${kids.map(x=>stRow(x,st)).join("")||`<p class="note">No kids in that number range.</p>`}</div>`;
+}
+function stRow(x,st){
+  const m=myRow(x.id)||{};
+  return `<div class="st-row"><div class="st-who"><b class="st-no">${tyNo(x)}</b><span>${esc(x.first_name)} ${esc(x.last_name)}<small>${esc([x.positions,x.grade?"Gr "+x.grade:""].filter(Boolean).join(" · "))}</small></span></div>
+    <div class="st-in">${st.tools.map(k=>`<div class="st-tool">${st.tools.length>1?`<span>${toolLabel(k)}</span>`:""}<div class="seg st-seg" role="group" aria-label="${toolLabel(k)} for number ${tyNo(x)}">${[1,2,3,4,5].map(v=>`<button type="button" data-st-x="${x.id}" data-st-k="${k}" data-v="${v}" aria-pressed="${m[k]===v}">${v}</button>`).join("")}</div></div>`).join("")}
+      ${(st.nums||[]).map(k=>`<label class="st-num">${TY_NUMS[k].l}<input type="number" step="${TY_NUMS[k].step}" inputmode="decimal" data-num-x="${x.id}" data-num-k="${k}" value="${m[k]??""}"></label>`).join("")}
+      <button type="button" class="linkbtn" data-stnote="${x.id}">${m.note?"Note ✓":"Note"}</button></div></div>`;
+}
+// Stopwatch
+const tyT={run:false,t0:0,raf:0,ev:"sixty",who:null,lastHtml:"",undo:null};
+function tyTimerWire(){
+  const go=$("#tyw-go");if(!go)return;const st=STATIONS.find(s=>s.id===tyStation);
+  if(!st.timer.includes(tyT.ev))tyT.ev=st.timer[0];
+  const who=$("#tyw-who");if(who&&!tyT.who)tyT.who=who.value;
+  go.addEventListener("pointerdown",e=>{e.preventDefault();tyTimerTap();});
+  go.addEventListener("keydown",e=>{if(e.key===" "||e.key==="Enter"){e.preventDefault();tyTimerTap();}});
+}
+function tyTimerTap(){
+  const clock=$("#tyw-clock"),go=$("#tyw-go");
+  if(!tyT.run){tyT.run=true;tyT.t0=performance.now();go.textContent="Stop";go.classList.add("stop");
+    const tick=()=>{if(!tyT.run)return;clock.textContent=((performance.now()-tyT.t0)/1000).toFixed(2);tyT.raf=requestAnimationFrame(tick);};tick();return;}
+  tyT.run=false;cancelAnimationFrame(tyT.raf);const secs=+((performance.now()-tyT.t0)/1000).toFixed(2);clock.textContent=secs.toFixed(2);
+  go.textContent="Start";go.classList.remove("stop");
+  const who=$("#tyw-who"),xid=who&&who.value;if(!xid)return;const x=tyPlayers.find(p=>p.id===xid),k=tyT.ev,prev=(myRow(xid)||{})[k];
+  const best=prev==null?secs:Math.min(+prev,secs);tyScore(xid,{[k]:best});tyT.undo={xid,k,prev:prev??null};
+  tyT.lastHtml=`#${tyNo(x)} ${esc(x.first_name)}: <b>${secs.toFixed(2)} s</b>${best!==secs?` (best ${(+best).toFixed(2)})`:""} <button type="button" class="linkbtn" id="tyw-undo">Undo</button>`;
+  const opts=[...who.options],i=opts.findIndex(o=>o.value===xid);if(i>=0&&i<opts.length-1){who.value=opts[i+1].value;}tyT.who=who.value;
+  $("#tyw-last").innerHTML=tyT.lastHtml;
+  const inp=document.querySelector(`[data-num-x="${xid}"][data-num-k="${k}"]`);if(inp)inp.value=best;
+}
+
+// Board: rankings, hidden until the head coach reveals them so coaches don't anchor on each other.
+function tyBoardHtml(t){
   const f1=v=>v==null?"—":v.toFixed(1),sq=id=>(teams.find(x=>x.id===id)||{}).name||"";
+  const hide=t.blind!==false&&!t.revealed;
   let rows=tyPlayers.map(x=>({x,s:tyStats(x)}));
   if(tyFilter==="open")rows=rows.filter(r=>r.x.status==="registered");
+  const coaches=new Set(tyScores.map(s=>s.coach_id)).size;
+  if(hide){
+    rows.sort((p,q)=>(p.x.tryout_no??1e9)-(q.x.tryout_no??1e9));
+    return `<div class="banner"><span>Scores stay hidden until the head coach reveals them, so coaches score what they see instead of matching each other. ${coaches} coach${coaches===1?"":"es"} scoring so far.</span>${isAdmin?`<button type="button" class="primary" data-tyreveal="1">Reveal scores</button>`:""}</div>
+      <div class="tbl-wrap"><table class="ty-board"><thead><tr><th>#</th><th class="l">Player</th><th>Gr</th><th class="l">Pos</th><th>Days here</th><th>Coaches scored</th><th>My scores today</th><th></th></tr></thead><tbody>
+      ${rows.map(({x,s})=>{const m=myRow(x.id)||{};const mine=TOOLS.filter(([k])=>m[k]!=null).map(([k,l])=>`${l} ${m[k]}`).join(", ");return `<tr><td>${tyNo(x)}</td><td class="l"><b>${esc(tyName(x))}</b></td><td>${esc(x.grade)}</td><td class="l">${esc(x.positions)}</td><td>${(x.checked_in_days||[]).length}</td><td>${new Set(tyScores.filter(z=>z.tryout_player_id===x.id).map(z=>z.coach_id)).size}</td><td class="l">${esc(mine)||"—"}</td><td><button class="linkbtn" data-ty="score" data-id="${x.id}">Score</button></td></tr>`;}).join("")}</tbody></table></div>`;
+  }
   rows.sort((p,q)=>(q.s.overall??-1)-(p.s.overall??-1));
   const placed=tyPlayers.filter(x=>x.status==="placed").length,cut=tyPlayers.filter(x=>x.status==="not_placed").length;
-  box.innerHTML=`<div class="panel stack" style="gap:10px">
-    <div class="sec-head" style="margin:0"><h3>${esc(t.title)}: ${tyPlayers.length} player${tyPlayers.length===1?"":"s"}</h3>
-      <div class="seg" role="group"><button data-tyf="all" aria-pressed="${tyFilter==="all"}">Everyone</button><button data-tyf="open" aria-pressed="${tyFilter==="open"}">Not decided</button></div></div>
-    <p class="note">${placed} placed, ${cut} not placed, ${tyPlayers.length-placed-cut} to decide. Scores are 1 to 5, averaged across every coach who scored the player. Tap Score on your phone during tryouts.</p>
-    <div class="tbl-wrap"><table class="ty-board"><thead><tr><th class="l">Player</th><th>Gr</th><th class="l">Pos</th><th>B/T</th>${TOOLS.map(([,l])=>`<th>${l}</th>`).join("")}<th>60 yd</th><th>Velo</th><th>Pop</th><th>Overall</th><th>Coaches</th><th class="l">Result</th><th></th></tr></thead><tbody>
-    ${rows.map(({x,s})=>`<tr><td class="l"><b>${esc(tyName(x))}</b>${x.ai_summary?`<div class="note" style="max-width:340px">${esc(x.ai_summary)}</div>`:""}</td><td>${esc(x.grade)}</td><td class="l">${esc(x.positions)}</td><td>${esc([x.bats,x.throws].filter(Boolean).join("/"))}</td>
-      ${TOOLS.map(([k])=>`<td>${f1(s[k])}</td>`).join("")}<td>${s.sixty??"—"}</td><td>${s.velo??"—"}</td><td>${s.pop??"—"}</td><td><b>${f1(s.overall)}</b></td><td>${s.n}</td>
+  const bias=coachBias().filter(c=>Math.abs(c.bias)>=0.5);
+  return `<div class="row" style="justify-content:space-between"><div class="seg" role="group"><button data-tyf="all" aria-pressed="${tyFilter==="all"}">Everyone</button><button data-tyf="open" aria-pressed="${tyFilter==="open"}">Not decided</button></div>${isAdmin&&t.blind!==false?`<button type="button" data-tyreveal="0">Hide scores again</button>`:""}</div>
+    <p class="note">${placed} placed, ${cut} not placed, ${tyPlayers.length-placed-cut} to decide. Scores are 1 to 5, averaged across every coach and every day. Times are each player's best.</p>
+    ${bias.length?`<div class="banner"><span>${bias.map(c=>`<b>${esc(c.name||"A coach")}</b> scores about ${Math.abs(c.bias).toFixed(1)} ${c.bias>0?"higher":"lower"} than the other coaches on the same players.`).join(" ")} Worth a quick talk about the scoring guide.</span></div>`:""}
+    <div class="tbl-wrap"><table class="ty-board"><thead><tr><th>#</th><th class="l">Player</th><th>Gr</th><th class="l">Pos</th>${TOOLS.map(([,l])=>`<th>${l}</th>`).join("")}<th>60 yd</th><th>H-1B</th><th>Velo</th><th>Pop</th><th>Overall</th><th>Days</th><th>Coaches</th><th class="l">Result</th><th></th></tr></thead><tbody>
+    ${rows.map(({x,s})=>`<tr><td>${tyNo(x)}</td><td class="l"><b>${esc(tyName(x))}</b>${x.ai_summary?`<div class="note" style="max-width:340px">${esc(x.ai_summary)}</div>`:""}</td><td>${esc(x.grade)}</td><td class="l">${esc(x.positions)}</td>
+      ${TOOLS.map(([k])=>`<td>${f1(s[k])}</td>`).join("")}<td>${s.sixty??"—"}</td><td>${s.h2f??"—"}</td><td>${s.velo??"—"}</td><td>${s.pop??"—"}</td><td><b>${f1(s.overall)}</b></td><td>${(x.checked_in_days||[]).length}</td><td>${s.coaches}</td>
       <td class="l">${x.status==="placed"?`<span class="chip ok">${esc(sq(x.placed_team_id))}</span>`:x.status==="not_placed"?`<span class="chip rest">Not placed</span>`:""}</td>
-      <td class="l"><button class="linkbtn" data-ty="score" data-id="${x.id}">Score</button> · <button class="linkbtn" data-ty="place" data-id="${x.id}">Place</button> · <button class="linkbtn" data-ty="ai" data-id="${x.id}">AI summary</button>${x.status!=="registered"?` · <button class="linkbtn" data-ty="msg" data-id="${x.id}">Message family</button>`:""}</td></tr>`).join("")||`<tr><td class="l note" colspan="20">No one signed up yet. Open sign-ups, or add players below as they arrive.</td></tr>`}
-    </tbody></table></div>
-    <form class="row" id="ty-walk"><label class="f">First name<input id="tyw-first" maxlength="40"></label><label class="f">Last name<input id="tyw-last" maxlength="40"></label><label class="f">Grade<input id="tyw-grade" maxlength="5" style="width:60px"></label><label class="f">Positions<input id="tyw-pos" maxlength="60"></label><button type="submit">Add walk-up</button><span class="status" id="tyw-status"></span></form>
-  </div>`;
+      <td class="l"><button class="linkbtn" data-ty="score" data-id="${x.id}">Score</button> · <button class="linkbtn" data-ty="place" data-id="${x.id}">Place</button> · <button class="linkbtn" data-ty="ai" data-id="${x.id}">AI summary</button>${x.status!=="registered"?` · <button class="linkbtn" data-ty="msg" data-id="${x.id}">Message family</button>`:""}</td></tr>`).join("")||`<tr><td class="l note" colspan="22">No one signed up yet.</td></tr>`}
+    </tbody></table></div>`;
 }
+// How far each coach's scores sit from the other coaches' scores on the same players and skills.
+function coachBias(){
+  const by={};
+  for(const s of tyScores)for(const [k] of TOOLS){if(s[k]==null)continue;
+    const others=tyScores.filter(o=>o.tryout_player_id===s.tryout_player_id&&o.coach_id!==s.coach_id&&o[k]!=null).map(o=>o[k]);if(!others.length)continue;
+    (by[s.coach_id]||(by[s.coach_id]={name:s.coach_name,d:[]})).d.push(s[k]-avg(others));}
+  return Object.values(by).filter(c=>c.d.length>=8).map(c=>({name:c.name,bias:avg(c.d)}));
+}
+function tySetupHtml(t){
+  const g=tyGuide(t);
+  return `<label class="row" style="gap:8px;font-weight:600"><input type="checkbox" id="ty-blind" ${t.blind!==false?"checked":""} style="width:18px;height:18px;accent-color:var(--red)"> Hide everyone's scores until an admin reveals them</label>
+    <p class="note">Coaches still see their own scores. Reveal on the Board when scoring is done.</p>
+    <h3>Scoring guide</h3><p class="note">What a 1, a 3, and a 5 look like for this tryout. Coaches see it at their station.</p>
+    <div class="stack" style="gap:10px">${TOOLS.map(([k,l])=>`<div><b>${l}</b><div class="g-edit">${[0,1,2].map(i=>`<label class="f">${[1,3,5][i]}<input type="text" data-guide="${k}" data-gi="${i}" maxlength="120" value="${esc(g[k][i])}"></label>`).join("")}</div></div>`).join("")}</div>
+    <div class="row"><button type="button" class="primary" id="ty-setup-save">Save setup</button><button type="button" id="ty-guide-reset">Use the default guide</button><span class="status" id="ty-setup-status"></span></div>`;
+}
+async function tySaveSetup(reset){
+  const t=curTy(),st=$("#ty-setup-status"),rubric={};
+  if(!reset)$$("[data-guide]").forEach(i=>{(rubric[i.dataset.guide]||(rubric[i.dataset.guide]=["","",""]))[+i.dataset.gi]=i.value.trim();});
+  const upd={blind:$("#ty-blind").checked,rubric:reset?null:rubric};
+  const {error}=await sb.from("tryouts").update(upd).eq("id",t.id);
+  if(error){setStatus(st,/rubric|blind/.test(error.message||"")?"Setup needs supabase/014_tryout_days.sql run in Supabase first.":errText(error),"err");return;}
+  Object.assign(t,upd);renderTyBody();setStatus($("#ty-setup-status"),"Saved.","ok");
+}
+document.addEventListener("click",async e=>{
+  if(!e.target.closest("#ty-board"))return;
+  const m=e.target.closest("[data-tymode]");if(m){tyMode=m.dataset.tymode;lsSet("ty-mode",tyMode);renderTyBody();return;}
+  const ci=e.target.closest("[data-ci],[data-ci-undo]");if(ci){const x=tyPlayers.find(p=>p.id===(ci.dataset.ci||ci.dataset.ciUndo));if(x)tyCheckIn(x,!!ci.dataset.ciUndo);return;}
+  const sb_=e.target.closest("[data-st-x]");if(sb_){const on=sb_.getAttribute("aria-pressed")==="true",v=on?null:+sb_.dataset.v;
+    sb_.parentElement.querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed","false"));if(!on)sb_.setAttribute("aria-pressed","true");
+    tyScore(sb_.dataset.stX,{[sb_.dataset.stK]:v});return;}
+  const n=e.target.closest("[data-stnote]");if(n){const x=tyPlayers.find(p=>p.id===n.dataset.stnote),cur=(myRow(x.id)||{}).note||"";
+    const s=sheet(`<h2 id="gen-title">Note on #${tyNo(x)} ${esc(tyName(x))}</h2><label class="f">Note<textarea id="stn-body" maxlength="500">${esc(cur)}</textarea></label><div class="row"><button class="primary big" type="button" id="stn-save" style="flex:1">Save note</button><button type="button" data-close>Cancel</button></div>`);
+    s.querySelector("#stn-save").onclick=()=>{tyScore(x.id,{note:$("#stn-body").value.trim()});closeSheetGen();renderTyBody();};return;}
+  const ev=e.target.closest("[data-twev]");if(ev){tyT.ev=ev.dataset.twev;renderTyBody();return;}
+  if(e.target.closest("#tyw-undo")&&tyT.undo){const u=tyT.undo;tyScore(u.xid,{[u.k]:u.prev});tyT.undo=null;tyT.lastHtml="Last time removed.";renderTyBody();return;}
+  const rv=e.target.closest("[data-tyreveal]");if(rv){const t=curTy(),revealed=rv.dataset.tyreveal==="1";const {error}=await sb.from("tryouts").update({revealed}).eq("id",t.id);
+    if(error){alertBoard(/revealed/.test(error.message||"")?"Needs supabase/014_tryout_days.sql run in Supabase first.":errText(error));return;}t.revealed=revealed;logAct(revealed?"Revealed tryout scores":"Hid tryout scores");renderTyBody();return;}
+  if(e.target.closest("#ty-setup-save"))tySaveSetup(false);else if(e.target.closest("#ty-guide-reset"))tySaveSetup(true);
+});
+document.addEventListener("change",e=>{
+  if(!e.target.closest("#ty-board"))return;const el=e.target;
+  if(el.id==="ty-station"){tyStation=el.value;lsSet("ty-station",tyStation);tyT.who=null;renderTyBody();}
+  else if(el.id==="ty-from"||el.id==="ty-to"){tyRange[el.id==="ty-from"?"from":"to"]=el.value;tyT.who=null;renderTyBody();}
+  else if(el.id==="tyw-who")tyT.who=el.value;
+  else if(el.dataset.numX){const v=el.value===""?null:+el.value;tyScore(el.dataset.numX,{[el.dataset.numK]:v});}
+});
+document.addEventListener("input",e=>{if(e.target.id!=="ty-find")return;tySearch=e.target.value;const pos=e.target.selectionStart;renderTyBody();const f=$("#ty-find");if(f){f.focus();try{f.setSelectionRange(pos,pos);}catch(err){}}});
 document.addEventListener("submit",async e=>{
   if(e.target.id!=="ty-walk")return;e.preventDefault();const st=$("#tyw-status");
   const row={tryout_id:curTryout,team_id:TEAM.id,first_name:$("#tyw-first").value.trim(),last_name:$("#tyw-last").value.trim(),grade:$("#tyw-grade").value.trim(),positions:$("#tyw-pos").value.trim()};
   if(!row.first_name||!row.last_name){setStatus(st,"Enter a first and last name.","err");return;}
-  try{await q(sb.from("tryout_players").insert(row));renderBoard();}catch(err){setStatus(st,errText(err),"err");}
+  try{const r=await q(sb.from("tryout_players").insert(row).select());await tyCheckIn(r[0],false);await renderBoard();}catch(err){setStatus(st,errText(err),"err");}
 });
 $("#ty-add").onclick=async()=>{
   const st=$("#ty-status"),title=$("#ty-title").value.trim();if(!title){setStatus(st,"Give the tryout a title.","err");return;}
@@ -1378,20 +1576,18 @@ $("#ty-add").onclick=async()=>{
   catch(err){setStatus(st,/tryouts/.test(err.message||"")?"Tryouts aren't set up yet. Run supabase/010_hs_tools.sql in Supabase.":errText(err),"err");}
 };
 function scoreSheet(x){
-  const mine=tyScores.find(s=>s.tryout_player_id===x.id&&s.coach_id===me.id)||{};
-  const s=sheet(`<h2 id="gen-title">Score ${esc(tyName(x))}</h2><p class="note">${esc([x.grade?`Grade ${x.grade}`:"",x.positions,[x.bats,x.throws].filter(Boolean).join("/")].filter(Boolean).join(" · "))}${x.family_note?`<br>Family note: ${esc(x.family_note)}`:""}</p>
+  const mine=myRow(x.id)||{};
+  const s=sheet(`<h2 id="gen-title">#${tyNo(x)} ${esc(tyName(x))}</h2><p class="note">${esc([x.grade?`Grade ${x.grade}`:"",x.positions,[x.bats,x.throws].filter(Boolean).join("/")].filter(Boolean).join(" · "))}${x.family_note?`<br>Family note: ${esc(x.family_note)}`:""}<br>Your scores for today.</p>
     <div class="score-grid">${TOOLS.map(([k,l])=>`<span class="f-label">${l}</span><div class="seg" role="group" data-tool="${k}">${[1,2,3,4,5].map(v=>`<button type="button" data-v="${v}" aria-pressed="${mine[k]===v}">${v}</button>`).join("")}</div>`).join("")}</div>
-    <div class="row"><label class="f">60-yard (sec)<input type="number" step="0.01" id="sc-sixty" value="${mine.sixty??""}" style="width:90px"></label><label class="f">Velo (mph)<input type="number" step="0.1" id="sc-velo" value="${mine.velo??""}" style="width:90px"></label><label class="f">Pop time (sec)<input type="number" step="0.01" id="sc-pop" value="${mine.pop??""}" style="width:90px"></label></div>
+    <div class="row">${Object.entries(TY_NUMS).map(([k,n])=>`<label class="f">${n.l} (${n.u})<input type="number" step="${n.step}" id="sc-${k}" value="${mine[k]??""}" style="width:90px"></label>`).join("")}</div>
     <label class="f">Note<textarea id="sc-note" maxlength="500">${esc(mine.note||"")}</textarea></label>
-    <span class="status" id="sc-status2"></span>
     <div class="row"><button class="primary big" type="button" id="sc-save" style="flex:1">Save score</button><button type="button" data-close>Cancel</button></div>`);
   s.querySelectorAll("[data-tool]").forEach(g=>g.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;const on=b.getAttribute("aria-pressed")==="true";g.querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed","false"));if(!on)b.setAttribute("aria-pressed","true");}));
-  s.querySelector("#sc-save").onclick=async()=>{
-    const row={tryout_player_id:x.id,team_id:TEAM.id,coach_id:me.id,coach_name:me.name||me.email,note:$("#sc-note").value.trim(),updated_at:new Date().toISOString()};
-    s.querySelectorAll("[data-tool]").forEach(g=>{const b=g.querySelector('[aria-pressed="true"]');row[g.dataset.tool]=b?+b.dataset.v:null;});
-    for(const k of ["sixty","velo","pop"]){const v=$("#sc-"+k).value;row[k]=v===""?null:+v;}
-    try{await q(sb.from("tryout_scores").upsert(row,{onConflict:"tryout_player_id,coach_id"}));closeSheetGen();renderBoard();}
-    catch(err){setStatus($("#sc-status2"),errText(err),"err");}
+  s.querySelector("#sc-save").onclick=()=>{
+    const f={note:$("#sc-note").value.trim()};
+    s.querySelectorAll("[data-tool]").forEach(g=>{const b=g.querySelector('[aria-pressed="true"]');f[g.dataset.tool]=b?+b.dataset.v:null;});
+    for(const k of Object.keys(TY_NUMS)){const v=$("#sc-"+k).value;f[k]=v===""?null:+v;}
+    tyScore(x.id,f);closeSheetGen();renderTyBody();
   };
 }
 function placeSheet(x){
@@ -1418,20 +1614,20 @@ function placeSheet(x){
 async function tyAi(x,btn){
   if(!aiEnabled){alertBoard(AI_OFF);return;}
   btn.disabled=true;btn.textContent="Thinking…";
-  const s=tyStats(x),sc=tyScores.filter(t=>t.tryout_player_id===x.id).map(t=>({coach:t.coach_name,arm:t.arm,speed:t.speed,fielding:t.fielding,hitting:t.hitting,pitching:t.pitching,sixty:t.sixty,velo:t.velo,pop:t.pop,note:t.note}));
+  const s=tyStats(x),sc=tyScores.filter(t=>t.tryout_player_id===x.id).map(t=>({coach:t.coach_name,day:t.day,arm:t.arm,speed:t.speed,fielding:t.fielding,hitting:t.hitting,pitching:t.pitching,makeup:t.makeup,sixty:t.sixty,home_to_first:t.h2f,velo:t.velo,pop:t.pop,note:t.note}));
   const all=tyPlayers.map(y=>({o:tyStats(y).overall})).filter(y=>y.o!=null).map(y=>y.o).sort((a,b)=>b-a);
   try{const out=await ai(`You are helping high school baseball coaches review tryouts. Summarize one player's tryout from the coaches' scores (1 to 5) and notes in 2 short sentences for the coaching staff, and suggest which squad fits based on how the player ranks.
 ${COACH_RULES}
 Return ONLY JSON: {"summary":"","suggested_squad":"one of the squad names, or 'not placed'"}.
 SQUADS: ${JSON.stringify(squads().map(t=>t.name))}
-PLAYER: ${JSON.stringify({grade:x.grade,positions:x.positions,bats:x.bats,throws:x.throws,averages:{arm:s.arm,speed:s.speed,fielding:s.fielding,hitting:s.hitting,pitching:s.pitching,overall:s.overall},best_60:s.sixty,top_velo:s.velo,best_pop:s.pop})}
+PLAYER: ${JSON.stringify({grade:x.grade,positions:x.positions,bats:x.bats,throws:x.throws,averages:{arm:s.arm,speed:s.speed,fielding:s.fielding,hitting:s.hitting,pitching:s.pitching,makeup:s.makeup,overall:s.overall},best_60:s.sixty,best_home_to_first:s.h2f,top_velo:s.velo,best_pop:s.pop,days_attended:(x.checked_in_days||[]).length})}
 EACH COACH: ${JSON.stringify(sc)}
 OVERALL SCORES OF EVERY PLAYER AT TRYOUTS (highest first): ${JSON.stringify(all.map(v=>+v.toFixed(2)))}`);
     const txt=`${out.summary||""}${out.suggested_squad?` Suggested: ${out.suggested_squad}.`:""}`.trim();
     await q(sb.from("tryout_players").update({ai_summary:txt}).eq("id",x.id));renderBoard();
   }catch(e){btn.disabled=false;btn.textContent="AI summary";alertBoard(e.message);}
 }
-const alertBoard=t=>{const b=$("#ty-board .note");if(b){b.textContent=t;b.classList.add("flag");}};
+const alertBoard=t=>{const b=$("#ty-sync")||$("#ty-board .note");if(b){b.textContent=t;b.classList.add("flag");}};
 function msgSheet(x){
   const sq=(teams.find(t=>t.id===x.placed_team_id)||{}).name||"",coach=me.name||"Coach",parent=x.parent_name?x.parent_name.split(" ")[0]:"";
   const subj=x.status==="placed"?`${x.first_name} made ${sq}`:`${x.first_name}'s tryout`;
