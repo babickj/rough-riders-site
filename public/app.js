@@ -4,7 +4,9 @@
 "use strict";
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const CFG=window.RR_CONFIG||{};
-const configured=CFG.supabaseUrl&&!/PASTE_/.test(CFG.supabaseUrl);
+// Refuse to run with a secret key in the public config: it would bypass every access rule.
+const keyRole=(()=>{try{return JSON.parse(atob(String(CFG.supabaseAnonKey).split(".")[1].replace(/-/g,"+").replace(/_/g,"/"))).role;}catch(e){return /^sb_secret_/.test(CFG.supabaseAnonKey||"")?"service_role":null;}})();
+const configured=CFG.supabaseUrl&&!/PASTE_/.test(CFG.supabaseUrl)&&!/PASTE_/.test(CFG.supabaseAnonKey||"")&&keyRole!=="service_role";
 const sb=configured?window.supabase.createClient(CFG.supabaseUrl,CFG.supabaseAnonKey):null;
 
 let S=null, TEAM=null, teams=[], session=null, role=null, siteAdmin=false, canEdit=false, isAdmin=false, isCoach=false, aiEnabled=false, aiMulti=false;
@@ -1500,7 +1502,7 @@ $("#lv-sheet-card").addEventListener("click",async e=>{
 
 // ---------- start ----------
 async function boot(){
-  if(!sb){document.body.innerHTML=`<main class="wrap" style="padding-block:40px"><h2>Almost there</h2><p>Add the Supabase project URL and anon key to <code>config.js</code>, then redeploy.</p></main>`;return;}
+  if(!sb){document.body.innerHTML=`<main class="wrap" style="padding-block:40px"><h2>Almost there</h2><p>${keyRole==="service_role"?"<code>config.js</code> has the secret service_role key, which would let anyone change the database. Replace it with the <b>anon public</b> key and redeploy.":"Add the Supabase project URL and <b>anon public</b> key to <code>public/config.js</code>, then redeploy."}</p></main>`;return;}
   try{teams=await q(sb.from("teams").select("*").order("name"));}
   catch(e){document.body.innerHTML=`<main class="wrap" style="padding-block:40px"><h2>Can't reach the team database</h2><p>${esc(errText(e))}</p></main>`;return;}
   const params=new URLSearchParams(location.search),pick=params.has("pick");
