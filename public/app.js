@@ -881,7 +881,10 @@ async function boot(){
   }
   lsSet("rr-team",TEAM.id);
   await loadTeamData();
-  const {data}=await sb.auth.getSession();session=data.session;
+  // Show the public schedule and stats right away; sign-in state fills in after.
+  render();route();
+  try{const r=await Promise.race([sb.auth.getSession(),new Promise((_,rej)=>setTimeout(()=>rej(new Error("slow")),5000))]);session=r.data.session;}
+  catch(e){session=null;}
   await refreshRole();render();route();loadRequests();
   fetch("/api/ai").then(r=>r.ok?r.json():{enabled:false}).then(j=>{aiEnabled=!!j.enabled;renderSchedule();$("#scan-run").disabled=!(aiEnabled&&$("#scan-file").files.length);
     if(!aiEnabled)$("#scan-status").textContent="Photo reading is turned off for this site. Enter numbers in the tables below.";}).catch(()=>{});

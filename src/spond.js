@@ -29,7 +29,7 @@ async function spondGet(token, path) {
 }
 
 // Turn one Spond event into a game, or null for practices, meetings and cancelled events.
-export function parseEvent(ev, tz) {
+export function parseEvent(ev, tz, teamName = "") {
   const title = String(ev.heading || "").trim();
   if (!title || !ev.startTimestamp) return null;
   if (/\b(practice|practise|training|workout|meeting|party|picture|photo day|clinic|tryout|evaluation|scrimmage practice|batting cage)\b/i.test(title)) return null;
@@ -40,8 +40,16 @@ export function parseEvent(ev, tz) {
   const date = `${parts.year}-${parts.month}-${parts.day}`;
   const time = `${parts.hour}:${parts.minute} ${parts.dayPeriod}`;
   let opp = title, home = true;
+  const squash = (x) => x.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const us = squash(teamName);
+  // "Home Team – Away Team" style titles: drop our side, keep the opponent. Listed first = home.
+  const sides = title.split(/\s+[–—-]\s+|\s+(?:vs\.?|v\.?|versus|@|at)\s+/i);
   const m = title.match(/(?:^|\s)(vs\.?|v\.?|versus|@|at)\s+(.+)$/i);
-  if (m) { opp = m[2]; home = !/^(@|at)$/i.test(m[1]); }
+  if (us && sides.length === 2 && sides.some((x) => squash(x).includes(us))) {
+    const ourIdx = squash(sides[0]).includes(us) ? 0 : 1;
+    opp = sides[1 - ourIdx].trim();
+    home = m && /^(@|at)$/i.test(m[1]) ? ourIdx === 1 : ourIdx === 0;
+  } else if (m) { opp = m[2]; home = !/^(@|at)$/i.test(m[1]); }
   opp = opp.replace(/\s*[-–—|:]\s*(game|home|away)\b.*$/i, "").replace(/^(game|home game|away game)\s*[-–—:]?\s*/i, "").trim() || title;
   if (/\baway\b/i.test(title) && !m) home = false;
   const loc = (ev.location && (ev.location.feature || ev.location.address)) || "";
@@ -60,10 +68,11 @@ function db(env) {
 
 export async function syncTeam(env, team, token) {
   const q = db(env), tz = env.SPOND_TIMEZONE || "America/Los_Angeles";
+  if (!team.name) team.name = ((await q(`teams?id=eq.${encodeURIComponent(team.id)}&select=name`))[0] || {}).name || "";
   token = token || await spondLogin(env);
   const from = new Date(Date.now() - 14 * 864e5).toISOString().slice(0, 10) + "T00:00:00.000Z";
   const events = await spondGet(token, `sponds/?max=500&scheduled=true&includeHidden=false&groupId=${encodeURIComponent(team.spond_group)}&minStartTimestamp=${from}`) || [];
-  const games = events.map((e) => parseEvent(e, tz)).filter(Boolean);
+  const games = events.map((e) => parseEvent(e, tz, team.name)).filter(Boolean);
   const existing = await q(`games?team_id=eq.${encodeURIComponent(team.id)}&spond_id=not.is.null&select=id,spond_id,status`);
   const byId = Object.fromEntries(existing.map((g) => [g.spond_id, g]));
   let added = 0, updated = 0, removed = 0;
