@@ -5,11 +5,12 @@ import * as spond from "./src/spond.js";
 import * as icsync from "./src/icsync.js";
 import * as reports from "./src/reports.js";
 import * as recruit from "./src/recruit.js";
+import * as mine from "./src/mine.js";
 import { calendar } from "./src/calendar.js";
 
 // Nightly write-up refresh: 10:23 UTC is about 2:23 AM Pacific (3:23 in summer).
 const NIGHTLY = "23 10 * * *";
-const routes = { "/api/admin": admin, "/api/ai": ai, "/api/spond": spond, "/api/calsync": icsync, "/api/report": reports, "/api/recruit": recruit };
+const routes = { "/api/admin": admin, "/api/ai": ai, "/api/spond": spond, "/api/calsync": icsync, "/api/report": reports, "/api/recruit": recruit, "/api/mine": mine };
 
 export default {
   async fetch(request, env, ctx) {

@@ -536,6 +536,7 @@ async function onMediaClick(e){
 }
 $("#gallery").addEventListener("click",onMediaClick);
 $("#pl-gallery").addEventListener("click",onMediaClick);
+$("#pl-mine").addEventListener("click",e=>{if(e.target.closest("img[data-full]"))onMediaClick(e);});
 $("#tag-chips").addEventListener("click",e=>chipToggle(e,tagSel));
 $("#tag-cancel").onclick=()=>{$("#tag-sheet").hidden=true;};
 $("#tag-sheet").addEventListener("click",e=>{if(e.target.id==="tag-sheet")$("#tag-sheet").hidden=true;});
@@ -723,7 +724,11 @@ async function renderMine(pid){
       ${fx.length?`<h5>Working on</h5><ul>${fx.map(f=>`<li><b>${esc(f.title||"")}</b>${f.drill?`: ${esc(f.drill)}`:f.why?`: ${esc(f.why)}`:""}</li>`).join("")}</ul>`:""}</div>`;}
   const notes=nt.data||[];
   html+=`<div class="panel"><h3>Notes from your coaches</h3>${notes.map(n=>`<div class="note-item"><div class="meta"><span class="topic">${TOPICS[n.topic]||"General"}</span><span>${esc(n.by_name||"Coach")}</span><span>${esc(new Date(n.created_at).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"}))}</span></div><div class="body">${esc(n.body)}</div></div>`).join("")||`<p class="note">No notes shared with you yet.</p>`}</div>`;
+  html+=`<div class="panel"><h3>Your photos and videos</h3><div class="gallery" id="pl-mine-gallery"><p class="note">Loading…</p></div></div>`;
   box.innerHTML=html;
+  try{const r=await api("/api/mine",{team_id:TEAM.id});(r.media||[]).forEach(m=>{mediaById[m.id]=m;});
+    $("#pl-mine-gallery").innerHTML=(r.media||[]).map(m=>tileHtml(m,r.urls||{})).join("")||`<p class="note">No photos or videos of you yet.</p>`;}
+  catch(e){$("#pl-mine-gallery").innerHTML=`<p class="note">${esc(e.message)}</p>`;}
 }
 async function renderNotes(pid){
   const box=$("#pl-notes");
