@@ -6,6 +6,8 @@
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
+const ROLES = ["admin", "coach", "scorekeeper", "parent", "player"];
+
 export async function onRequestPost({ request, env }) {
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY)
     return json({ error: "The admin service isn't configured yet. Add SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in Cloudflare." }, 501);
@@ -58,16 +60,29 @@ export async function onRequestPost({ request, env }) {
     return null;
   };
 
+  // A player login must point at a player on this team's roster; a parent may optionally.
+  async function linkablePlayer(pid, role) {
+    if (!pid) return role === "player" ? false : null;
+    if (!/^[0-9a-f-]{36}$/.test(String(pid))) return false;
+    const r = await rest(`players?id=eq.${pid}&team_id=eq.${encodeURIComponent(team_id)}&select=id`);
+    return r.ok && (await r.json()).length ? String(pid) : false;
+  }
+
   if (action === "list") {
-    const r = await rest(`memberships?team_id=eq.${encodeURIComponent(team_id)}&select=user_id,role,display_name,email,created_at&order=role.asc,display_name.asc`);
-    return json({ members: await r.json() });
+    const r = await rest(`memberships?team_id=eq.${encodeURIComponent(team_id)}&select=user_id,role,display_name,email,created_at,player_id&order=role.asc,display_name.asc`);
+    if (r.ok) return json({ members: await r.json() });
+    // Before 013_player_logins.sql there's no player_id column.
+    const r2 = await rest(`memberships?team_id=eq.${encodeURIComponent(team_id)}&select=user_id,role,display_name,email,created_at&order=role.asc,display_name.asc`);
+    return json({ members: await r2.json() });
   }
 
   if (action === "add") {
     const email = String(body.email || "").trim().toLowerCase();
     const role = body.role;
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error: "Enter a valid email address." }, 400);
-    if (!["admin", "coach", "scorekeeper", "parent"].includes(role)) return json({ error: "Pick a role." }, 400);
+    if (!ROLES.includes(role)) return json({ error: "Pick a role." }, 400);
+    const player_id = await linkablePlayer(body.player_id, role);
+    if (player_id === false) return json({ error: "Pick which player on this team's roster they are." }, 400);
     let user = await findUserByEmail(email), created = false;
     if (!user) {
       if (!body.password || String(body.password).length < 8) return json({ error: "Set a temporary password of at least 8 characters." }, 400);
@@ -77,17 +92,24 @@ export async function onRequestPost({ request, env }) {
     }
     const m = await rest("memberships", {
       method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=representation" },
-      body: JSON.stringify({ user_id: user.id, team_id, role, display_name: body.name || "", email }),
+      body: JSON.stringify({ user_id: user.id, team_id, role, display_name: body.name || "", email, ...(player_id ? { player_id } : {}) }),
     });
-    if (!m.ok) return json({ error: "Couldn't add them to the team." }, 400);
+    if (!m.ok) return json({ error: role === "player" || player_id ? "Couldn't add them. If this is a player login, run supabase/013_player_logins.sql in Supabase first." : "Couldn't add them to the team." }, 400);
     return json({ ok: true, created });
   }
 
   const target = String(body.user_id || "");
   if (!/^[0-9a-f-]{36}$/.test(target)) return json({ error: "Pick a person." }, 400);
 
+  if (action === "link_player") {
+    const player_id = body.player_id ? await linkablePlayer(body.player_id, "parent") : null;
+    if (player_id === false) return json({ error: "That player isn't on this team." }, 400);
+    const r = await rest(`memberships?user_id=eq.${target}&team_id=eq.${encodeURIComponent(team_id)}`, { method: "PATCH", body: JSON.stringify({ player_id }) });
+    return r.ok ? json({ ok: true }) : json({ error: "Couldn't link them. Run supabase/013_player_logins.sql in Supabase first." }, 400);
+  }
+
   if (action === "set_role") {
-    if (!["admin", "coach", "scorekeeper", "parent"].includes(body.role)) return json({ error: "Pick a role." }, 400);
+    if (!ROLES.includes(body.role)) return json({ error: "Pick a role." }, 400);
     if (target === caller.id && body.role !== "admin" && !siteAdmin) return json({ error: "You can't remove your own admin access." }, 400);
     const r = await rest(`memberships?user_id=eq.${target}&team_id=eq.${encodeURIComponent(team_id)}`, { method: "PATCH", body: JSON.stringify({ role: body.role }) });
     return r.ok ? json({ ok: true }) : json({ error: "Couldn't change the role." }, 400);

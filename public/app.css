@@ -371,3 +371,11 @@ nav.tabs .wrap.more-l:not(.more-r){-webkit-mask-image:linear-gradient(90deg,tran
 .poschips button.bak{border-color:var(--fg);border-style:dashed}
 #depth td.gap{color:var(--bad);font-weight:600}
 #pl-sub .posline{margin-top:6px}
+
+/* ---- player logins ---- */
+body:not(.has-mine) .mine-only{display:none!important}
+body:not(.viewing-own) #pl-mine{display:none!important}
+body.viewing-own .coach-only.own-ok{display:block!important}
+.player-head{align-items:center}
+.mine-ty{border-left:4px solid var(--good)}
+#ad-members select+select{margin-left:6px}

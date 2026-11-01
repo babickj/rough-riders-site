@@ -124,3 +124,8 @@ No database changes needed.
 1. In TeamSnap on a computer: open the team, **Schedule > Settings > Sync Calendar / Export**, copy the calendar link. (GameChanger, SportsEngine, Google Calendar and others work too: use their "subscribe" or iCal link.)
 2. On the site, **Admin > TeamSnap or other calendar sync**, paste the link, press **Connect and sync**.
 3. Games re-sync every two hours with Spond, or with **Sync now** on the Schedule tab. Practices are skipped; cancelled games show as cancelled; games deleted in TeamSnap come off. The link is saved as a private file (`media/_sync/<team>.json`) that only the server can read.
+
+### 13. Private roster, positions, player logins
+1. In Supabase **SQL Editor**, run `supabase/013_player_logins.sql` once (it includes 012).
+2. The roster is now only for signed-in team members. Parents and players see it once it's posted.
+3. In **Admin > Add a person**, pick **Player** and which player they are on the roster (or **Parent** and, optionally, their player). Players and linked parents get a **My page** tab: their own stats, trends, game log, measurements, reviewed write-up, tryout result, and any coach notes marked "Share with the player".

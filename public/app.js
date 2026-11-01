@@ -9,7 +9,7 @@ const keyRole=(()=>{try{return JSON.parse(atob(String(CFG.supabaseAnonKey).split
 const configured=CFG.supabaseUrl&&!/PASTE_/.test(CFG.supabaseUrl)&&!/PASTE_/.test(CFG.supabaseAnonKey||"")&&keyRole!=="service_role";
 const sb=configured?window.supabase.createClient(CFG.supabaseUrl,CFG.supabaseAnonKey):null;
 
-let S=null, TEAM=null, teams=[], session=null, role=null, siteAdmin=false, canEdit=false, isAdmin=false, isCoach=false, aiEnabled=false, aiMulti=false;
+let S=null, TEAM=null, teams=[], session=null, role=null, myPlayer=null, siteAdmin=false, canEdit=false, isAdmin=false, isCoach=false, aiEnabled=false, aiMulti=false;
 const me={id:null,email:"",name:""};
 let curLineup=null, pendingEnter=null, pendingData=null, myTeams=[], myAdminTeams=[];
 
@@ -78,6 +78,9 @@ async function loadTeamData(){
   S.totals={};if(!tt.error)for(const r of tt.data||[])S.totals[r.game_id]={bat:r.bat||{},pit:r.pit||{},fld:r.fld||{}};
   const o=await sb.from("player_games").select("*").eq("team_id",TEAM.id).order("date");
   S.outside=o.error?[]:o.data; S.outsideReady=!o.error;
+  // A player (or a parent linked to them) gets only their own numbers from each game.
+  if(myPlayer&&!isCoach&&!l.data.length){const ml=await sb.rpc("my_lines",{t:TEAM.id});
+    if(!ml.error)for(const r of ml.data||[]){if(!r.bat&&!r.pit&&!r.fld)continue;const L=S.lines[r.game_id]||(S.lines[r.game_id]={bat:{},pit:{},fld:{}});if(r.bat)L.bat[r.player_id]=r.bat;if(r.pit)L.pit[r.player_id]=r.pit;if(r.fld)L.fld[r.player_id]=r.fld;}}
 }
 const gameRow=g=>({id:g.id,team_id:TEAM.id,date:g.date,time:g.time||"",opp:g.opp,home:!!g.home,loc:g.loc||"",status:g.status||"scheduled",us:g.us,them:g.them,lineup:g.lineup||null,...(g.kind==="event"?{kind:"event"}:{})});
 const isEvent=g=>g&&g.kind==="event";
@@ -117,14 +120,14 @@ const blobToB64=b=>new Promise(r=>{const fr=new FileReader();fr.onload=()=>r(Str
 
 // ---------- auth ----------
 async function refreshRole(){
-  role=null;siteAdmin=false;me.id=null;me.email="";me.name="";myTeams=[];myAdminTeams=[];
+  role=null;myPlayer=null;siteAdmin=false;me.id=null;me.email="";me.name="";myTeams=[];myAdminTeams=[];
   if(session){
     me.id=session.user.id;me.email=session.user.email||"";me.name=session.user.user_metadata?.name||"";
     try{
       const [m,sa]=await Promise.all([
-        sb.from("memberships").select("role,display_name").eq("user_id",me.id).eq("team_id",TEAM.id),
+        sb.from("memberships").select("*").eq("user_id",me.id).eq("team_id",TEAM.id),
         sb.from("site_admins").select("user_id").eq("user_id",me.id)]);
-      role=m.data?.[0]?.role||null; if(m.data?.[0]?.display_name)me.name=m.data[0].display_name;
+      role=m.data?.[0]?.role||null; myPlayer=m.data?.[0]?.player_id||null; if(m.data?.[0]?.display_name)me.name=m.data[0].display_name;
       siteAdmin=!!sa.data?.length; if(siteAdmin)role="admin";
       if(siteAdmin){myTeams=teams.map(t=>t.id);myAdminTeams=myTeams.slice();}
       else{const all=await sb.from("memberships").select("team_id,role").eq("user_id",me.id);myTeams=(all.data||[]).map(x=>x.team_id);myAdminTeams=(all.data||[]).filter(x=>x.role==="admin").map(x=>x.team_id);}
@@ -136,8 +139,10 @@ async function refreshRole(){
   document.body.classList.toggle("can-edit",canEdit);
   document.body.classList.toggle("is-owner",isAdmin);
   document.body.classList.toggle("is-coach",isCoach);
+  document.body.classList.toggle("has-mine",!!myPlayer&&!isCoach);
+  const nm=$("#nav-me");if(nm)nm.textContent=role==="player"?"My page":"My player";
 }
-const ROLE_LABEL={admin:"Admin",coach:"Coach",scorekeeper:"Scorekeeper",parent:"Parent"};
+const ROLE_LABEL={admin:"Admin",coach:"Coach",scorekeeper:"Scorekeeper",parent:"Parent",player:"Player"};
 function renderAcct(){
   const a=$("#acct");
   const all=teams.length>1?`<a href="/">All teams</a>`:"";
@@ -630,7 +635,8 @@ function renderPlayer(pid){
     const ps=q_?`${outsToIp(q_.outs||0)} IP, ${q_.pc||0} P, ${q_.so||0} K, ${q_.er||0} ER`:"";
     const fs=f?`${f.po||0} PO, ${f.a||0} A${f.e?`, ${f.e} E`:""}`:"";
     return `<tr class="${r.kind}"><td class="l">${fmtDay(r.date)} ${esc(r.label)}</td><td>${r.res}</td><td>${bs}</td><td>${ps}</td><td>${fs}</td>${canDel?`<td>${r.kind==="outside"?`<button class="linkbtn" data-ogdel="${r.id}">Delete</button>`:""}</td>`:""}</tr>`;}).join("")+`</tbody>`:`<tbody><tr><td class="l note">No games yet.</td></tr></tbody>`;
-  if(!isCoach)return;
+  $("#pl-edit").hidden=!canEdit;
+  if(!isCoach){if(pid===myPlayer){renderMetrics(pid);renderMine(pid);}return;}
   renderMedia($("#pl-gallery"),pid);renderMetrics(pid);renderNotes(pid);prepAddForms();
   $("#pl-aiok").checked=!!p.ai_ok;renderWriteup(pid);renderRecruit(pid);renderShowcases(pid);
 }
@@ -700,22 +706,45 @@ $("#pl-metrics").addEventListener("click",async e=>{
   if(pendingMt!==d.dataset.mtdel){pendingMt=d.dataset.mtdel;d.textContent="Tap again to delete";return;}
   pendingMt=null;try{await q(sb.from("player_metrics").delete().eq("id",d.dataset.mtdel));renderMetrics(curPlayer);}catch(err){}
 });
+// What a player (or their linked parent) sees from the coaches: tryout result, reviewed write-up, shared notes.
+async function renderMine(pid){
+  const box=$("#pl-mine");box.innerHTML=`<p class="note">Loading…</p>`;
+  const [ty,wu,nt]=await Promise.all([
+    sb.from("tryout_players").select("status,placed_team_id,created_at").eq("placed_player_id",pid).order("created_at",{ascending:false}).limit(3),
+    sb.from("ai_reports").select("*").eq("player_id",pid).eq("kind","player").eq("status","reviewed").order("created_at",{ascending:false}).limit(1),
+    sb.from("player_notes").select("*").eq("player_id",pid).eq("shared",true).order("created_at",{ascending:false}).limit(50)]);
+  let html="";
+  const placed=(ty.data||[]).filter(x=>x.status==="placed");
+  if(placed.length)html+=`<div class="panel mine-ty"><h3>Tryout result</h3>${placed.map(x=>`<p><b>You made ${esc((teams.find(t=>t.id===x.placed_team_id)||{}).name||"the team")}.</b> Welcome to the team.</p>`).join("")}</div>`;
+  const r=(wu.data||[])[0];
+  if(r){const o=r.output||{},fx=Array.isArray(o.focus)?o.focus:[];
+    html+=`<div class="panel"><h3>Your development plan</h3><p class="note">Reviewed by your coaches ${esc(dateStr(r.reviewed_at||r.created_at))}.</p>${o.summary?`<p>${esc(o.summary)}</p>`:""}
+      ${Array.isArray(o.strengths)&&o.strengths.length?`<h5>Doing well</h5><ul>${o.strengths.map(x=>`<li>${typeof x==="string"?esc(x):`<b>${esc(x.title||"")}</b>${x.detail?`. ${esc(x.detail)}`:""}`}</li>`).join("")}</ul>`:""}
+      ${fx.length?`<h5>Working on</h5><ul>${fx.map(f=>`<li><b>${esc(f.title||"")}</b>${f.drill?`: ${esc(f.drill)}`:f.why?`: ${esc(f.why)}`:""}</li>`).join("")}</ul>`:""}</div>`;}
+  const notes=nt.data||[];
+  html+=`<div class="panel"><h3>Notes from your coaches</h3>${notes.map(n=>`<div class="note-item"><div class="meta"><span class="topic">${TOPICS[n.topic]||"General"}</span><span>${esc(n.by_name||"Coach")}</span><span>${esc(new Date(n.created_at).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"}))}</span></div><div class="body">${esc(n.body)}</div></div>`).join("")||`<p class="note">No notes shared with you yet.</p>`}</div>`;
+  box.innerHTML=html;
+}
 async function renderNotes(pid){
   const box=$("#pl-notes");
   try{
     const rows=await q(sb.from("player_notes").select("*").eq("player_id",pid).order("created_at",{ascending:false}).limit(200));
-    box.innerHTML=rows.map(n=>`<div class="note-item" data-nid="${n.id}"><div class="meta"><span class="topic">${TOPICS[n.topic]||"General"}</span><span>${esc(n.by_name||"Coach")}</span><span>${esc(new Date(n.created_at).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"}))}</span><button class="linkbtn" data-ndel="${n.id}">Delete</button></div><div class="body">${esc(n.body)}</div></div>`).join("")||`<p class="note">No notes yet.</p>`;
+    box.innerHTML=rows.map(n=>`<div class="note-item" data-nid="${n.id}"><div class="meta"><span class="topic">${TOPICS[n.topic]||"General"}</span><span>${esc(n.by_name||"Coach")}</span><span>${esc(new Date(n.created_at).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"}))}</span>${n.shared?`<span class="chip ok">Shared with player</span>`:""}<button class="linkbtn" data-nshare="${n.id}" data-on="${n.shared?1:0}">${n.shared?"Stop sharing":"Share with player"}</button><button class="linkbtn" data-ndel="${n.id}">Delete</button></div><div class="body">${esc(n.body)}</div></div>`).join("")||`<p class="note">No notes yet.</p>`;
   }catch(e){box.innerHTML=`<p class="status err">${esc(/player_notes/.test(e.message||"")?"Coach notes aren't set up yet. Run supabase/005_players_media.sql in Supabase.":errText(e))}</p>`;}
 }
 $("#pl-note-form").addEventListener("submit",async e=>{
   e.preventDefault();const st=$("#pl-note-status"),body=$("#pl-note-body").value.trim();
   if(!body){setStatus(st,"Write a note first.","err");return;}
-  try{await q(sb.from("player_notes").insert({team_id:TEAM.id,player_id:curPlayer,topic:$("#pl-note-topic").value,body,by_name:me.name||me.email}));
+  const row={team_id:TEAM.id,player_id:curPlayer,topic:$("#pl-note-topic").value,body,by_name:me.name||me.email};if($("#pl-note-share").checked)row.shared=true;
+  try{await q(sb.from("player_notes").insert(row));$("#pl-note-share").checked=false;
     $("#pl-note-body").value="";setStatus(st,"Saved.","ok");renderNotes(curPlayer);}
   catch(err){setStatus(st,/player_notes/.test(err.message||"")?"Coach notes aren't set up yet. Run supabase/005_players_media.sql in Supabase.":errText(err),"err");}
 });
 let pendingNoteDel=null;
 $("#pl-notes").addEventListener("click",async e=>{
+  const sh=e.target.closest("[data-nshare]");
+  if(sh){try{await q(sb.from("player_notes").update({shared:sh.dataset.on!=="1"}).eq("id",sh.dataset.nshare));renderNotes(curPlayer);}
+    catch(err){setStatus($("#pl-note-status"),/shared/.test(err.message||"")?"Sharing notes needs supabase/013_player_logins.sql run in Supabase first.":errText(err),"err");}return;}
   const d=e.target.closest("[data-ndel]");if(!d)return;
   if(pendingNoteDel!==d.dataset.ndel){pendingNoteDel=d.dataset.ndel;d.textContent="Tap again to delete";return;}
   pendingNoteDel=null;try{await q(sb.from("player_notes").delete().eq("id",d.dataset.ndel));renderNotes(curPlayer);}catch(err){setStatus($("#pl-note-status"),errText(err),"err");}
@@ -725,6 +754,10 @@ $("#lightbox").onclick=()=>{$("#lightbox").hidden=true;};
 // ---------- admin ----------
 const genPw=()=>{const w="abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";const a=new Uint32Array(10);crypto.getRandomValues(a);return [...a].map(x=>w[x%w.length]).join("");};
 let members=[];
+const playerOpts=(sel,blank)=>`<option value="">${blank}</option>`+sortedPlayers().map(p=>`<option value="${p.id}" ${p.id===sel?"selected":""}>#${p.num} ${esc(p.name)}</option>`).join("");
+// Best guess at which roster spot a request means, from the player name they typed.
+function guessPlayer(name){const n=String(name||"").trim().toLowerCase();if(!n)return null;const ps=sortedPlayers();
+  return (ps.find(p=>p.name.toLowerCase()===n)||ps.find(p=>p.name.toLowerCase().split(/\s+/)[0]===n.split(/\s+/)[0])||{}).id||null;}
 function showPw(name,pw){
   const box=$("#ad-pwbox");box.hidden=false;
   box.innerHTML=`<span>Temporary password for ${esc(name)}: <span class="temp-pw">${esc(pw)}</span> Send it to them privately. They can change it under My account.</span><button type="button" id="pw-copy">Copy</button>`;
@@ -736,12 +769,12 @@ async function renderAdmin(){
   try{
     members=(await api("/api/admin",{action:"list",team_id:TEAM.id})).members||[];
     $("#ad-members").innerHTML=`<thead><tr><th class="l">Name</th><th class="l">Email</th><th class="l">Role</th><th class="l"></th></tr></thead><tbody>`+
-      members.map(m=>`<tr><td class="l">${esc(m.display_name||"")}</td><td class="l">${esc(m.email)}</td><td class="l"><select data-role="${m.user_id}" aria-label="Role for ${esc(m.email)}">${["coach","scorekeeper","admin","parent"].map(r=>`<option value="${r}" ${m.role===r?"selected":""}>${ROLE_LABEL[r]}</option>`).join("")}</select></td><td class="l"><button class="linkbtn" data-reset="${m.user_id}">Reset password</button>${m.user_id===me.id?"":` · <button class="linkbtn" data-remove="${m.user_id}">Remove</button>`}</td></tr>`).join("")+`</tbody>`;
+      members.map(m=>`<tr><td class="l">${esc(m.display_name||"")}</td><td class="l">${esc(m.email)}</td><td class="l"><select data-role="${m.user_id}" aria-label="Role for ${esc(m.email)}">${["coach","scorekeeper","admin","parent","player"].map(r=>`<option value="${r}" ${m.role===r?"selected":""}>${ROLE_LABEL[r]}</option>`).join("")}</select>${["player","parent"].includes(m.role)?`<select data-link="${m.user_id}" aria-label="Player for ${esc(m.email)}">${playerOpts(m.player_id,m.role==="player"?"Pick the player":"Not linked")}</select>`:""}</td><td class="l"><button class="linkbtn" data-reset="${m.user_id}">Reset password</button>${m.user_id===me.id?"":` · <button class="linkbtn" data-remove="${m.user_id}">Remove</button>`}</td></tr>`).join("")+`</tbody>`;
     setStatus(st,members.length?"":"No one added yet.");
   }catch(e){setStatus(st,errText(e),"err");}
   $("#ad-teams").hidden=!siteAdmin;
   if(siteAdmin){$("#ad-teamlist").innerHTML=`<div class="tbl-wrap"><table class="members"><tbody>${teams.map(t=>`<tr><td class="l"><b>${esc(t.name)}</b>${t.id===TEAM.id?" (this team)":""}</td><td class="l"><a href="${teamLink(t.id)}">${esc(teamUrl(t.id))}</a></td></tr>`).join("")}</tbody></table></div>`;$("#nt-preview").textContent=location.origin+"/web-name";}
-  const also=alsoBoxes("add");$("#ad-also").innerHTML=also;$("#ad-also").hidden=!also;
+  const also=alsoBoxes("add");$("#ad-also").innerHTML=also;$("#ad-also").hidden=!also;adRoleChanged();
   try{
     const log=await q(sb.from("activity").select("*").eq("team_id",TEAM.id).order("at",{ascending:false}).limit(25));
     $("#ad-log").innerHTML=log.length?`<thead><tr><th class="l">When</th><th class="l">Who</th><th class="l">Change</th></tr></thead><tbody>${log.map(l=>`<tr><td class="l">${esc(new Date(l.at).toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}))}</td><td class="l">${esc(l.by_name||"Someone")}</td><td class="l">${esc(l.what)}</td></tr>`).join("")}</tbody>`:"";
@@ -749,8 +782,10 @@ async function renderAdmin(){
   }catch(e){}
 }
 $("#ad-members").addEventListener("change",async e=>{
-  const s=e.target.closest("[data-role]");if(!s)return;const st=$("#ad-mstatus");
-  try{await api("/api/admin",{action:"set_role",team_id:TEAM.id,user_id:s.dataset.role,role:s.value});setStatus(st,"Role updated.","ok");logAct("Changed a role");}
+  const st=$("#ad-mstatus"),lk=e.target.closest("[data-link]");
+  if(lk){try{await api("/api/admin",{action:"link_player",team_id:TEAM.id,user_id:lk.dataset.link,player_id:lk.value||null});setStatus(st,lk.value?"Linked to that player.":"Unlinked.","ok");logAct("Linked a login to a player");}catch(err){setStatus(st,err.message,"err");renderAdmin();}return;}
+  const s=e.target.closest("[data-role]");if(!s)return;
+  try{await api("/api/admin",{action:"set_role",team_id:TEAM.id,user_id:s.dataset.role,role:s.value});setStatus(st,s.value==="player"?"Role updated. Now pick which player they are.":"Role updated.","ok");logAct("Changed a role");renderAdmin();}
   catch(err){setStatus(st,err.message,"err");renderAdmin();}
 });
 let pendingRemove=null;
@@ -764,10 +799,11 @@ $("#ad-members").addEventListener("click",async e=>{
   }
 });
 $("#ad-add").onclick=async()=>{
-  const st=$("#ad-astatus"),name=$("#ad-name").value.trim(),email=$("#ad-email").value.trim(),r=$("#ad-role").value,pw=genPw();
+  const st=$("#ad-astatus"),name=$("#ad-name").value.trim(),email=$("#ad-email").value.trim(),r=$("#ad-role").value,pw=genPw(),player_id=["player","parent"].includes(r)?$("#ad-player").value||null:null;
   if(!email){setStatus(st,"Enter their email.","err");return;}
+  if(r==="player"&&!player_id){setStatus(st,"Pick which player on the roster they are.","err");return;}
   setStatus(st,"Adding…");
-  try{const res=await api("/api/admin",{action:"add",team_id:TEAM.id,name,email,role:r,password:pw});
+  try{const res=await api("/api/admin",{action:"add",team_id:TEAM.id,name,email,role:r,password:pw,player_id});
     const more=await addToTeams(alsoChecked("add"),{name,email,role:r,password:pw});
     setStatus(st,(res.created?`Added ${name||email}.`:`Added ${name||email}. They already had an account, so their password didn't change.`)+more,"ok");$$('[data-also="add"]').forEach(x=>x.checked=false);
     if(res.created)showPw(name||email,pw);
@@ -857,7 +893,7 @@ let requests=[];
 const otherAdminTeams=()=>teams.filter(t=>t.id!==TEAM.id&&myAdminTeams.includes(t.id)).sort((a,b)=>String(a.school||"~").localeCompare(String(b.school||"~"))||a.name.localeCompare(b.name));
 const alsoBoxes=(key,checked=[])=>{const ts=otherAdminTeams();return ts.length?`<div class="also"><span class="f-label">Also add to</span>${ts.map(t=>`<label><input type="checkbox" data-also="${key}" value="${t.id}" ${checked.includes(t.id)?"checked":""}>${esc(t.name)}</label>`).join("")}</div>`:"";};
 const alsoChecked=key=>$$(`[data-also="${key}"]:checked`).map(x=>x.value);
-async function addToTeams(ids,person){const done=[],failed=[];for(const id of ids){try{await api("/api/admin",{action:"add",team_id:id,...person});done.push(id);}catch(e){failed.push(id);}}
+async function addToTeams(ids,person){if(person.role==="player")return "";const done=[],failed=[];for(const id of ids){try{await api("/api/admin",{action:"add",team_id:id,...person});done.push(id);}catch(e){failed.push(id);}}
   if(done.length)try{await sb.from("access_requests").update({status:"approved"}).eq("email",person.email.toLowerCase()).eq("status","pending").in("team_id",done);}catch(e){}
   const nm=id=>(teams.find(t=>t.id===id)||{}).name||id;
   return (done.length?` Also added to ${done.map(nm).join(", ")}.`:"")+(failed.length?` Couldn't add to ${failed.map(nm).join(", ")} (you need to be an admin there).`:"");}
@@ -871,15 +907,17 @@ async function loadRequests(){
   let elsewhere={};
   if(requests.length&&otherAdminTeams().length){const r2=await sb.from("access_requests").select("email,team_id").in("email",requests.map(r=>r.email)).eq("status","pending").neq("team_id",TEAM.id);
     for(const x of r2.data||[])(elsewhere[x.email]=elsewhere[x.email]||[]).push(x.team_id);}
-  list.innerHTML=requests.length?`<div class="tbl-wrap"><table class="members"><thead><tr><th class="l">Name</th><th class="l">Email</th><th class="l">Player</th><th class="l">Role</th><th class="l"></th></tr></thead><tbody>${requests.map(r=>`<tr><td class="l">${esc(r.name)}${r.note?`<div class="note">${esc(r.note)}</div>`:""}</td><td class="l">${esc(r.email)}</td><td class="l">${esc(r.player)}</td><td class="l"><select data-rqrole="${r.id}" aria-label="Role for ${esc(r.name)}">${["coach","scorekeeper","admin","parent"].map(x=>`<option value="${x}" ${r.role===x?"selected":""}>${ROLE_LABEL[x]}</option>`).join("")}</select>${alsoBoxes("rq-"+r.id,elsewhere[r.email]||[])}${(elsewhere[r.email]||[]).length?`<div class="note">Also asked to join the checked team${elsewhere[r.email].length>1?"s":""}.</div>`:""}</td><td class="l"><button class="linkbtn" data-rqok="${r.id}">Approve</button> · <button class="linkbtn" data-rqno="${r.id}">Decline</button></td></tr>`).join("")}</tbody></table></div>`:`<p class="note">No requests waiting. Visitors can ask for a login from the Sign in page.</p>`;
+  list.innerHTML=requests.length?`<div class="tbl-wrap"><table class="members"><thead><tr><th class="l">Name</th><th class="l">Email</th><th class="l">Player</th><th class="l">Role</th><th class="l"></th></tr></thead><tbody>${requests.map(r=>`<tr><td class="l">${esc(r.name)}${r.note?`<div class="note">${esc(r.note)}</div>`:""}</td><td class="l">${esc(r.email)}</td><td class="l">${esc(r.player)}<select data-rqplayer="${r.id}" aria-label="Roster spot for ${esc(r.name)}">${playerOpts(guessPlayer(r.player),"Not linked")}</select></td><td class="l"><select data-rqrole="${r.id}" aria-label="Role for ${esc(r.name)}">${["coach","scorekeeper","admin","parent","player"].map(x=>`<option value="${x}" ${r.role===x?"selected":""}>${ROLE_LABEL[x]}</option>`).join("")}</select>${alsoBoxes("rq-"+r.id,elsewhere[r.email]||[])}${(elsewhere[r.email]||[]).length?`<div class="note">Also asked to join the checked team${elsewhere[r.email].length>1?"s":""}.</div>`:""}</td><td class="l"><button class="linkbtn" data-rqok="${r.id}">Approve</button> · <button class="linkbtn" data-rqno="${r.id}">Decline</button></td></tr>`).join("")}</tbody></table></div>`:`<p class="note">No requests waiting. Visitors can ask for a login from the Sign in page.</p>`;
 }
 $("#rq-list").addEventListener("click",async e=>{
   const b=e.target.closest("[data-rqok],[data-rqno]");if(!b)return;const st=$("#rq-astatus");
   const r=requests.find(x=>x.id===(b.dataset.rqok||b.dataset.rqno));if(!r)return;
   try{
     if(b.dataset.rqok){
-      const role=$(`[data-rqrole="${r.id}"]`).value,pw=genPw();setStatus(st,"Creating their login…");
-      const res=await api("/api/admin",{action:"add",team_id:TEAM.id,name:r.name,email:r.email,role,password:pw});
+      const role=$(`[data-rqrole="${r.id}"]`).value,pw=genPw(),player_id=["player","parent"].includes(role)?$(`[data-rqplayer="${r.id}"]`).value||null:null;
+      if(role==="player"&&!player_id){setStatus(st,"Pick which player on the roster they are, in the Player column.","err");return;}
+      setStatus(st,"Creating their login…");
+      const res=await api("/api/admin",{action:"add",team_id:TEAM.id,name:r.name,email:r.email,role,password:pw,player_id});
       await q(sb.from("access_requests").update({status:"approved"}).eq("id",r.id));
       const more=await addToTeams(alsoChecked("rq-"+r.id),{name:r.name,email:r.email,role,password:pw});
       setStatus(st,(res.created?`Approved ${r.name}.`:`Approved ${r.name}. They already had a login, so their password didn't change.`)+more,"ok");
@@ -1565,7 +1603,10 @@ $("nav.tabs .wrap").addEventListener("scroll",navFade,{passive:true});addEventLi
 function route(){
   let v=location.hash.slice(1);
   if(v.startsWith("player-")){curPlayer=v.slice(7);v="player";}
-  if(v==="player"&&TEAM&&!isCoach)v=session?"roster":"signin";
+  if(v==="me"){if(myPlayer){curPlayer=myPlayer;v="player";}else v=session?"schedule":"signin";}
+  const own=!!(myPlayer&&curPlayer===myPlayer&&!isCoach);
+  if(v==="player"&&TEAM&&!isCoach&&!own)v=session?"roster":"signin";
+  document.body.classList.toggle("viewing-own",v==="player"&&own);
   if(!VIEWS.includes(v))v="schedule";
   if(!TEAM)v="teams";
   else{
@@ -1576,7 +1617,7 @@ function route(){
     if(v==="signin"&&session&&role)v="schedule";
   }
   for(const x of VIEWS)$("#v-"+x).hidden=x!==v;
-  const navV=v==="player"?"roster":v;curView=v;
+  const navV=v==="player"?(own?"me":"roster"):v;curView=v;
   $$("nav.tabs a").forEach(a=>a.getAttribute("data-v")===navV?a.setAttribute("aria-current","page"):a.removeAttribute("aria-current"));
   const cur=$("nav.tabs a[aria-current]");if(cur&&cur.scrollIntoView)cur.scrollIntoView({block:"nearest",inline:"nearest"});navFade();
   if(v!=="player"&&TEAM)document.title=`${S.team.name} Baseball`;
@@ -1600,7 +1641,7 @@ document.addEventListener("click",e=>{
   if(t.dataset.box){location.hash="#stats";$("#stat-game").value=t.dataset.box;renderStats();}
   else if(t.dataset.edit)openGameForm(findItem(t.dataset.edit));
   else if(t.dataset.enter){pendingEnter=t.dataset.enter;if(location.hash==="#scorebook")route();else location.hash="#scorebook";}
-  else if(t.dataset.pedit){const p=S.players.find(p=>p.id===t.dataset.pedit);editingPlayer=p.id;$("#player-form").hidden=false;$("#pf-name").value=p.name;$("#pf-num").value=p.num;$("#pf-delete").hidden=false;setPosForm(p);}
+  else if(t.dataset.pedit)openPlayerForm(S.players.find(p=>p.id===t.dataset.pedit));
   else if(t.dataset.st){statType=t.dataset.st;$$("[data-st]").forEach(b=>b.setAttribute("aria-pressed",b===t));renderStats();}
   else if(t.dataset.k){const k=t.dataset.k;if(sortKey[statType]===k)sortDir[statType]*=-1;else{sortKey[statType]=k;sortDir[statType]=(statType==="pit"&&["era","whip","h","r","er","bb"].includes(k))?1:-1;}renderStats();}
 });
@@ -1652,20 +1693,32 @@ document.addEventListener("click",async e=>{if(e.target.id!=="import-add")return
   if(await run($("#import-status"),`Added ${add.length} schedule item${add.length>1?"s":""}`,()=>q(sb.from("games").insert(add.map(g=>({...gameRow(g),kind:g.kind}))))))
     {add.forEach(putItem);render();$("#import-preview").innerHTML="";$("#import-text").value="";}
 });
-$("#add-player").onclick=()=>{editingPlayer=null;$("#player-form").hidden=false;$("#pf-name").value="";$("#pf-num").value="";$("#pf-delete").hidden=true;setPosForm(null);$("#pf-name").focus();};
+function openPlayerForm(p){
+  if(location.hash!=="#roster"){location.hash="#roster";setTimeout(()=>openPlayerForm(p),50);return;}
+  editingPlayer=p?p.id:null;$("#player-form").hidden=false;$("#pf-title").textContent=p?`Edit ${p.name}`:"Add player";
+  $("#pf-name").value=p?p.name:"";$("#pf-num").value=p?p.num:"";$("#pf-delete").hidden=!p;setPosForm(p);setStatus($("#pf-status"),"");
+  $("#player-form").scrollIntoView({behavior:"smooth",block:"center"});setTimeout(()=>$("#pf-name").focus({preventScroll:true}),300);
+}
+$("#add-player").onclick=()=>openPlayerForm(null);
+function adRoleChanged(){const r=$("#ad-role").value,show=["player","parent"].includes(r);$("#ad-player-wrap").hidden=!show;
+  $("#ad-player-label").textContent=r==="player"?"Which player":"Their player (optional)";$("#ad-player").innerHTML=playerOpts("",r==="player"?"Pick the player":"Not linked");
+  const also=$("#ad-also");if(also)also.hidden=r==="player"||!also.innerHTML;}
+$("#ad-role").addEventListener("change",adRoleChanged);
+$("#rq-role").addEventListener("change",()=>{$("#rq-player-label").textContent=$("#rq-role").value==="player"?"Your first and last name, as on the roster":"Your player's first and last name";});
+$("#pl-edit").onclick=()=>openPlayerForm(S.players.find(p=>p.id===curPlayer));
 $("#pf-cancel").onclick=()=>{$("#player-form").hidden=true};
-$("#pf-save").onclick=async()=>{const n=$("#pf-name").value.trim(),num=+$("#pf-num").value;if(!n)return;
+$("#pf-save").onclick=async()=>{const n=$("#pf-name").value.trim(),num=+$("#pf-num").value;if(!n){setStatus($("#pf-status"),"Enter a first name.","err");return;}
   const pri=POS.filter(x=>pfPos[x]==="pri"),bak=POS.filter(x=>pfPos[x]==="bak");
   const p=editingPlayer?{...S.players.find(x=>x.id===editingPlayer),name:n,num,pos_primary:pri,pos_backup:bak}:{id:uuid(),name:n,num,active:true,pos_primary:pri,pos_backup:bak};
   const row={id:p.id,team_id:TEAM.id,name:p.name,num:p.num,active:p.active!==false,pos_primary:pri,pos_backup:bak};
-  if(await run($("#ts-status"),`Saved player ${n}`,async()=>{try{return await q(sb.from("players").upsert(row));}
+  if(await run($("#pf-status"),`Saved player ${n}`,async()=>{try{return await q(sb.from("players").upsert(row));}
       catch(e){if(!/pos_primary|pos_backup|column/i.test(e.message||""))throw e;delete row.pos_primary;delete row.pos_backup;await q(sb.from("players").upsert(row));
         throw new Error("Saved the name and number. To save positions, run supabase/012_roster_positions.sql in Supabase first.");}})){
     const i=S.players.findIndex(x=>x.id===p.id);if(i>=0)S.players[i]=p;else S.players.push(p);render();$("#player-form").hidden=true;}
 };
 $("#pf-delete").onclick=async()=>{ // keep stats history: mark inactive instead of deleting
   const p=S.players.find(x=>x.id===editingPlayer);
-  if(await run($("#ts-status"),`Removed ${p.name} from the roster`,()=>q(sb.from("players").update({active:false}).eq("id",p.id)))){p.active=false;render();$("#player-form").hidden=true;}
+  if(await run($("#pf-status"),`Removed ${p.name} from the roster`,()=>q(sb.from("players").update({active:false}).eq("id",p.id)))){p.active=false;render();$("#player-form").hidden=true;}
 };
 $("#ts-save").onclick=async()=>{
   const rest=parseRest($("#ts-prest").value);
@@ -1997,7 +2050,7 @@ async function boot(){
   render();route();
   try{const r=await Promise.race([sb.auth.getSession(),new Promise((_,rej)=>setTimeout(()=>rej(new Error("slow")),5000))]);session=r.data.session;}
   catch(e){session=null;}
-  await refreshRole();if(canEdit)await loadTeamData();render();route();loadRequests();updateTryoutNav().catch(()=>{});
+  await refreshRole();if(canEdit||myPlayer)await loadTeamData();render();route();loadRequests();updateTryoutNav().catch(()=>{});
   fetch("/api/ai").then(r=>r.ok?r.json():{enabled:false}).then(j=>{aiEnabled=!!j.enabled;aiMulti=!!j.multi_image;renderSchedule();$("#scan-run").disabled=!(aiEnabled&&$("#scan-file").files.length);
     if(!aiEnabled)$("#scan-status").textContent="Photo reading is turned off for this site. Enter numbers in the tables below.";}).catch(()=>{});
   // Supabase can deadlock if its own calls are awaited inside this callback, so defer the work.

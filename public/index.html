@@ -25,6 +25,7 @@
 </header>
 <nav class="tabs" aria-label="Sections"><div class="wrap">
   <a href="#schedule" data-v="schedule">Schedule</a>
+  <a href="#me" data-v="me" id="nav-me" class="mine-only">My page</a>
   <a href="#live" data-v="live">Live</a>
   <a href="#stats" data-v="stats">Stats</a>
   <a href="#roster" data-v="roster" class="member-only">Roster</a>
@@ -112,6 +113,7 @@
   <section id="v-roster" class="stack" hidden>
     <div class="sec-head"><h2>Roster</h2><button type="button" class="edit-only" id="add-player">Add player</button></div>
     <div id="player-form" class="panel edit-only" hidden>
+      <h3 id="pf-title">Add player</h3>
       <div class="row">
         <label class="f">First name<input type="text" id="pf-name"></label>
         <label class="f">Jersey #<input type="number" id="pf-num" style="width:80px" min="0" max="99"></label>
@@ -120,7 +122,7 @@
         <div class="f" style="font-weight:600">Positions <span class="note">Tap once for primary, twice for backup, again to clear. Pick as many as fit.</span></div>
         <div class="poschips" id="pf-pos" role="group" aria-label="Positions"></div>
       </div>
-      <div class="row"><button class="primary" type="button" id="pf-save">Save player</button><button type="button" id="pf-cancel">Cancel</button><button type="button" id="pf-delete" hidden>Remove</button></div>
+      <div class="row"><button class="primary" type="button" id="pf-save">Save player</button><button type="button" id="pf-cancel">Cancel</button><button type="button" id="pf-delete" hidden>Remove</button><span class="status" id="pf-status"></span></div>
     </div>
     <details class="panel edit-only" id="depth-box"><summary>Depth chart</summary>
       <p class="note">Who plays where, from each player's primary and backup positions. Red means a position has no one listed.</p>
@@ -220,8 +222,8 @@
         <p class="note">Logins are for team staff. Scorekeepers enter games and keep live score. Coaches also see player stats, video, and coaching tools. The team admin reviews each request and sends you a password.</p>
         <label class="f">Your name<input type="text" id="rq-name" maxlength="80" autocomplete="name" required></label>
         <label class="f">Email<input type="email" id="rq-email" maxlength="200" autocomplete="email" required></label>
-        <label class="f">Your player's first name<input type="text" id="rq-player" maxlength="80"></label>
-        <label class="f">I'd like to<select id="rq-role"><option value="scorekeeper">Help keep score (scorekeeper)</option><option value="coach">Coach the team (coach)</option></select></label>
+        <label class="f">I am<select id="rq-role"><option value="parent">A parent of a player</option><option value="player">A player on the team</option><option value="scorekeeper">Helping keep score (scorekeeper)</option><option value="coach">A coach</option></select></label>
+        <label class="f"><span id="rq-player-label">Your player's first and last name</span><input type="text" id="rq-player" maxlength="80"></label>
         <label class="f">Anything the admin should know (optional)<input type="text" id="rq-note" maxlength="300"></label>
         <label class="f" style="position:absolute;left:-9999px" aria-hidden="true">Website<input type="text" id="rq-web" tabindex="-1" autocomplete="off"></label>
         <button type="submit" class="primary" id="rq-go">Send request</button>
@@ -283,7 +285,8 @@
 
   <section id="v-player" class="stack" hidden>
     <div><a href="#roster" class="linkbtn">← Roster</a></div>
-    <div class="player-head"><div class="jersey big" id="pl-num"></div><div><h2 id="pl-name"></h2><div class="note" id="pl-sub"></div></div></div>
+    <div class="player-head"><div class="jersey big" id="pl-num"></div><div style="flex:1;min-width:0"><h2 id="pl-name"></h2><div class="note" id="pl-sub"></div></div><button type="button" id="pl-edit" class="edit-only" hidden>Edit player</button></div>
+    <div id="pl-mine" class="mine-only stack" style="gap:14px"></div>
     <label class="row coach-only" style="gap:8px"><input type="checkbox" id="pl-aiok" style="width:18px;height:18px;accent-color:var(--red)"> Family has OK'd AI review of this player's photos and video</label>
     <div class="panel coach-only" id="ai-panel">
       <div class="sec-head" style="margin:0"><h3>Development write-up</h3><span class="row"><button class="primary" type="button" id="wu-refresh">Update now</button><button type="button" id="wu-deep">Season review</button></span></div>
@@ -297,7 +300,7 @@
     <label class="row" style="gap:8px;font-weight:600" id="pl-scope"><input type="checkbox" id="pl-outside" checked style="width:18px;height:18px;accent-color:var(--red)"> Include games outside the team</label>
     <div id="pl-stats" class="stack" style="gap:18px"></div>
     <div><h3 style="margin-bottom:8px">Trends</h3><div class="trends" id="pl-trends"></div></div>
-    <div class="coach-only"><h3 style="margin-bottom:8px">Measurements</h3><div class="trends" id="pl-metrics"></div></div>
+    <div class="coach-only own-ok"><h3 style="margin-bottom:8px">Measurements</h3><div class="trends" id="pl-metrics"></div></div>
     <div><h3 style="margin-bottom:8px">Game by game</h3><div class="tbl-wrap"><table id="pl-log"></table></div><span class="status" id="pl-log-status"></span></div>
     <div class="panel coach-only" id="pl-add">
       <details id="og-box">
@@ -374,10 +377,11 @@
     </div>
     <div class="panel coach-only" id="pl-notes-panel">
       <h3>Coach notes</h3>
-      <p class="note">Only this team's coaches and admins can see these notes. Write them as if the family might read them someday.</p>
+      <p class="note">Only coaches and admins see these notes, unless you share one. A shared note shows on the player's own page for the player and their linked parent.</p>
       <form id="pl-note-form" class="stack" style="gap:8px">
         <div class="row"><label class="f">Topic<select id="pl-note-topic"><option value="general">General</option><option value="hitting">Hitting</option><option value="pitching">Pitching</option><option value="fielding">Fielding</option><option value="baserunning">Baserunning</option><option value="effort">Effort and attitude</option></select></label></div>
         <textarea id="pl-note-body" maxlength="4000" placeholder="What did you see? What should they work on?"></textarea>
+        <label class="row" style="gap:8px"><input type="checkbox" id="pl-note-share" style="width:18px;height:18px;accent-color:var(--red)"> Share with the player and their family</label>
         <div class="row"><button class="primary" type="submit">Save note</button><span class="status" id="pl-note-status"></span></div>
       </form>
       <div id="pl-notes"></div>
@@ -437,7 +441,8 @@
       <div class="row">
         <label class="f">Name<input type="text" id="ad-name"></label>
         <label class="f">Email<input type="email" id="ad-email"></label>
-        <label class="f">Role<select id="ad-role"><option value="coach">Coach</option><option value="scorekeeper">Scorekeeper</option><option value="admin">Admin</option><option value="parent">Parent (team photos only)</option></select></label>
+        <label class="f">Role<select id="ad-role"><option value="coach">Coach</option><option value="scorekeeper">Scorekeeper</option><option value="admin">Admin</option><option value="parent">Parent</option><option value="player">Player</option></select></label>
+        <label class="f" id="ad-player-wrap" hidden><span id="ad-player-label">Which player</span><select id="ad-player"></select></label>
 
         <button class="primary" type="button" id="ad-add">Add person</button>
       </div>
