@@ -7,7 +7,7 @@ const CFG=window.RR_CONFIG||{};
 const configured=CFG.supabaseUrl&&!/PASTE_/.test(CFG.supabaseUrl);
 const sb=configured?window.supabase.createClient(CFG.supabaseUrl,CFG.supabaseAnonKey):null;
 
-let S=null, TEAM=null, teams=[], session=null, role=null, siteAdmin=false, canEdit=false, isAdmin=false, isCoach=false, aiEnabled=false;
+let S=null, TEAM=null, teams=[], session=null, role=null, siteAdmin=false, canEdit=false, isAdmin=false, isCoach=false, aiEnabled=false, aiMulti=false;
 const me={id:null,email:"",name:""};
 let curLineup=null, pendingEnter=null, pendingData=null, myTeams=[];
 
@@ -805,7 +805,7 @@ $("#nt-name").addEventListener("input",()=>{if(!$("#nt-id").dataset.touched)$("#
 $("#nt-id").addEventListener("input",()=>{$("#nt-id").dataset.touched="1";$("#nt-preview").textContent=location.origin+"/"+(slug($("#nt-id").value)||"web-name");});
 
 // ================= AI (coaches and admins only) =================
-const AI_OFF="AI is turned off for this site. Add ANTHROPIC_API_KEY in Cloudflare (Worker > Settings > Variables and Secrets) to turn it on.";
+const AI_OFF="AI is turned off for this site. Check that the Worker has the Workers AI binding (wrangler.jsonc) or an ANTHROPIC_API_KEY.";
 const notSetUp=e=>/ai_reports|ai_ok|live/.test((e&&e.message)||"")?"The AI tools aren't set up yet. Run supabase/007_coach_ai.sql in Supabase.":errText(e);
 const r3=x=>typeof x==="number"&&isFinite(x)&&!Number.isInteger(x)?+x.toFixed(3):x;
 const pickNums=(o,ks)=>o?Object.fromEntries(ks.filter(k=>o[k]!=null).map(k=>[k,r3(o[k])])):null;
@@ -900,7 +900,7 @@ function openAiReview(m){
   $("#air-body").innerHTML=missing.length?`<p>Before AI can look at this ${m.kind}, turn on <b>Family has OK'd AI review</b> on ${missing.map(p=>`<a href="#player-${p.id}">${esc(p.name)}'s page</a>`).join(", ")}. Everyone tagged in it needs it.</p><div class="row"><button type="button" data-air="close">Close</button></div>`:
    `<div class="row"><label class="f">Player<select id="air-player">${tagged.map(p=>`<option value="${p.id}" ${p.id===curPlayer?"selected":""}>#${p.num} ${esc(p.name)}</option>`).join("")}</select></label>
     <label class="f">Look at<select id="air-focus"><option>Hitting</option><option>Pitching</option><option>Fielding</option><option>Baserunning</option><option>General</option></select></label></div>
-    <p class="note">${m.kind==="video"?"The site takes about 10 still frames from the clip and sends them, with this player's recent stats and notes, for review.":"The photo is sent with this player's recent stats and notes for review."} Treat the result as a second set of eyes, not a verdict.</p>
+    <p class="note">${m.kind==="video"?`The site takes ${aiMulti?"about 10":"6"} still frames from the clip and sends them, with this player's recent stats and notes, for review.`:"The photo is sent with this player's recent stats and notes for review."} Treat the result as a second set of eyes, not a verdict.</p>
     <span class="status" id="air-status"></span><div id="air-result"></div>
     <div class="row"><button class="primary big" type="button" data-air="run" style="flex:1">Review it</button><button type="button" data-air="close">Close</button></div>`;
   aiSheet.hidden=false;const b=aiSheet.querySelector("button");if(b)b.focus();
@@ -917,6 +917,16 @@ async function videoFrames(blob,count=10,maxW=768){
     cx.drawImage(v,0,0,c.width,c.height);const b=await new Promise(r=>c.toBlob(r,"image/jpeg",.8));out.push({t,b64:await blobToB64(b),url:URL.createObjectURL(b)});}
   URL.revokeObjectURL(url);return out;
 }
+// Free vision model takes one image, so clip frames go in as one numbered contact sheet.
+async function contactSheet(frames,cols=3,cellW=420){
+  const imgs=await Promise.all(frames.map(f=>new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=f.url;})));
+  const cellH=Math.round(cellW*imgs[0].height/imgs[0].width),rows=Math.ceil(imgs.length/cols),gap=6;
+  const c=document.createElement("canvas");c.width=cols*cellW+(cols-1)*gap;c.height=rows*cellH+(rows-1)*gap;const x=c.getContext("2d");
+  x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);
+  imgs.forEach((im,i)=>{const cx=(i%cols)*(cellW+gap),cy=Math.floor(i/cols)*(cellH+gap);x.drawImage(im,cx,cy,cellW,cellH);
+    x.fillStyle="rgba(0,0,0,.75)";x.fillRect(cx,cy,44,34);x.fillStyle="#fff";x.font="bold 24px sans-serif";x.fillText(String(i+1),cx+(i+1>9?6:14),cy+26);});
+  const b=await new Promise(r=>c.toBlob(r,"image/jpeg",.85));return blobToB64(b);
+}
 async function runAiReview(){
   const st=$("#air-status"),m=aiMedia,pid=$("#air-player").value,focus=$("#air-focus").value,p=S.players.find(x=>x.id===pid);
   if(!aiEnabled){setStatus(st,AI_OFF,"err");return;}
@@ -924,18 +934,21 @@ async function runAiReview(){
   try{
     setStatus(st,m.kind==="video"?"Pulling frames from the clip…":"Loading the photo…");
     const blob=await mediaBlob(m);
-    const frames=m.kind==="video"?await videoFrames(blob):await (async()=>{const b=await resizeImage(blob,1280,.85);return [{t:null,b64:await blobToB64(b),url:URL.createObjectURL(b)}];})();
+    const frames=m.kind==="video"?await videoFrames(blob,aiMulti?10:6):await (async()=>{const b=await resizeImage(blob,1280,.85);return [{t:null,b64:await blobToB64(b),url:URL.createObjectURL(b)}];})();
     setStatus(st,"Reviewing. This usually takes 20–60 seconds.");
     const ctx=await playerContext(pid);
     const brief={...teamContext(),player:ctx.player,batting:ctx.batting_all_games,pitching:ctx.pitching_all_games,recent_games:ctx.game_log.slice(-5),
       coach_notes_on_topic:ctx.coach_notes.filter(n=>n.topic===focus.toLowerCase()||n.topic==="general").slice(0,6),caption:m.caption||""};
+    const sheet=m.kind==="video"&&!aiMulti;
+    const imgs=sheet?[{data:await contactSheet(frames),media_type:"image/jpeg",label:`This one image is a contact sheet of ${frames.length} frames from the video, in time order, numbered 1 to ${frames.length} left to right, top to bottom.`}]
+      :frames.map((f,i)=>({data:f.b64,media_type:"image/jpeg",label:m.kind==="video"?`Frame ${i+1} (${f.t.toFixed(1)}s)`:"Frame 1"}));
     const out=await aiImages(`You are an experienced youth baseball coach reviewing ${m.kind==="video"?`${frames.length} still frames taken in order from a short video`:"a photo"} of one player, #${p.num} ${p.name}. Focus area: ${focus}. Other people may appear; comment only on this player.
 Only describe what is actually visible. If the images don't show the motion clearly (camera angle, blur, player too small, a different activity), say so and set confidence to low.
 ${COACH_RULES}
 Return ONLY JSON with this shape: {"what_it_shows":"one sentence","positives":[""],"observations":[{"frame":1,"note":""}],"focus":[{"title":"","why":"","drill":""}],"confidence":"low|medium|high","caveats":"one sentence"}. At most 3 positives, 6 observations, and 2 focus items.${m.kind==="video"?"":" Use frame 1 for the photo."}
 
 PLAYER CONTEXT:
-${JSON.stringify(brief)}`,frames.map((f,i)=>({data:f.b64,media_type:"image/jpeg",label:m.kind==="video"?`Frame ${i+1} (${f.t.toFixed(1)}s)`:"Frame 1"})));
+${JSON.stringify(brief)}`,imgs);
     if(!out||!out.what_it_shows)throw new Error("The AI's answer was incomplete. Try again.");
     out.focus_area=focus;
     const saved=await saveReport({kind:"clip",player_id:pid,media_id:m.id,output:out});
@@ -1393,7 +1406,7 @@ async function boot(){
   try{const r=await Promise.race([sb.auth.getSession(),new Promise((_,rej)=>setTimeout(()=>rej(new Error("slow")),5000))]);session=r.data.session;}
   catch(e){session=null;}
   await refreshRole();if(canEdit)await loadTeamData();render();route();loadRequests();
-  fetch("/api/ai").then(r=>r.ok?r.json():{enabled:false}).then(j=>{aiEnabled=!!j.enabled;renderSchedule();$("#scan-run").disabled=!(aiEnabled&&$("#scan-file").files.length);
+  fetch("/api/ai").then(r=>r.ok?r.json():{enabled:false}).then(j=>{aiEnabled=!!j.enabled;aiMulti=!!j.multi_image;renderSchedule();$("#scan-run").disabled=!(aiEnabled&&$("#scan-file").files.length);
     if(!aiEnabled)$("#scan-status").textContent="Photo reading is turned off for this site. Enter numbers in the tables below.";}).catch(()=>{});
   // Supabase can deadlock if its own calls are awaited inside this callback, so defer the work.
   sb.auth.onAuthStateChange((ev,sess)=>{

@@ -10,6 +10,8 @@
   },
   // Keep variables and secrets set in the Cloudflare dashboard when deploying.
   "keep_vars": true,
+  // Cloudflare Workers AI: free daily allowance, used when no ANTHROPIC_API_KEY is set.
+  "ai": { "binding": "AI" },
   // Spond schedule sync every 2 hours (times are UTC).
   "triggers": { "crons": ["17 */2 * * *"] },
   "observability": { "enabled": true }

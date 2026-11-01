@@ -40,7 +40,7 @@ Paste the Project URL and anon key into `public/config.js` and commit it. Both a
 3. In the Worker, **Settings > Variables and Secrets**, add:
    - `SUPABASE_URL` = Project URL (type Text)
    - `SUPABASE_SERVICE_ROLE_KEY` = service_role key (type Secret)
-   - `ANTHROPIC_API_KEY` = optional, turns on scoresheet photo and Spond reading (type Secret)
+   - `ANTHROPIC_API_KEY` = optional, switches the AI from Cloudflare's free models to Claude (type Secret)
 4. Every push to `main` redeploys. The site is live at `https://rough-riders-site.<your-subdomain>.workers.dev`.
 
 ### 4. Spond schedule sync (optional)
@@ -68,7 +68,8 @@ played outside the team (shown only on that page; pitches count toward rest days
 velocity. Trends chart batting average, on-base percentage, pitches per outing, and each measurement over time.
 
 ### 8. Coach role and AI
-Run `supabase/007_coach_ai.sql` once, and add `ANTHROPIC_API_KEY` (type Secret) to the Worker.
+Run `supabase/007_coach_ai.sql` once. AI runs on Cloudflare Workers AI by default (free daily allowance,
+the `ai` binding in `wrangler.jsonc`, no key needed). To use Claude instead, add `ANTHROPIC_API_KEY` (type Secret).
 - Player page > **Write a new report**: development report from stats, trends, measurements and coach notes.
 - Photos > **AI review** on a clip or photo: about 10 frames are pulled in the browser and reviewed. Every tagged
   player needs **Family has OK'd AI review** checked on their page first.
