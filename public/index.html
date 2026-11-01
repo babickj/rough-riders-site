@@ -160,8 +160,19 @@
         <button class="primary big" type="submit" id="si-go">Sign in</button>
         <span class="status" id="si-status"></span>
       </form>
-      <p class="note" id="si-help">Coaches and scorekeepers enter games and keep live score. Parents can sign in to see team photos and videos. Your team admin creates your account and gives you a temporary password. Forgot it? Ask your team admin to reset it.</p>
-      <p class="note">Schedule, results, stats, and the roster are open to everyone without signing in.</p>
+      <p class="note" id="si-help">Forgot your password? Ask your team admin to reset it. Schedule, results, stats, and the roster are open to everyone without signing in.</p>
+      <form class="authbox panel" id="rq-form" style="max-width:440px">
+        <h3>Don't have a login? Request one</h3>
+        <p class="note">Parents get access to team photos and videos. Scorekeepers can enter games and keep live score. The team admin reviews each request and sends you a password.</p>
+        <label class="f">Your name<input type="text" id="rq-name" maxlength="80" autocomplete="name" required></label>
+        <label class="f">Email<input type="email" id="rq-email" maxlength="200" autocomplete="email" required></label>
+        <label class="f">Your player's first name<input type="text" id="rq-player" maxlength="80"></label>
+        <label class="f">I'd like to<select id="rq-role"><option value="parent">See photos and videos (parent)</option><option value="scorekeeper">Help keep score (scorekeeper)</option></select></label>
+        <label class="f">Anything the admin should know (optional)<input type="text" id="rq-note" maxlength="300"></label>
+        <label class="f" style="position:absolute;left:-9999px" aria-hidden="true">Website<input type="text" id="rq-web" tabindex="-1" autocomplete="off"></label>
+        <button type="submit" class="primary" id="rq-go">Send request</button>
+        <span class="status" id="rq-status"></span>
+      </form>
     </div>
   </section>
 
@@ -220,6 +231,11 @@
 
   <section id="v-admin" class="stack owner-only" hidden>
     <div class="sec-head"><h2>Admin</h2></div>
+    <div class="panel" id="rq-panel">
+      <h3>Access requests</h3>
+      <div id="rq-list"></div>
+      <span class="status" id="rq-astatus"></span>
+    </div>
     <div class="panel">
       <h3>People</h3>
       <p class="note">Admins manage people and settings. Scorekeepers enter games and keep live score. Parents see photos and videos. Everyone else can see the schedule, stats, and roster without an account.</p>

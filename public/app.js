@@ -106,6 +106,7 @@ function renderAcct(){
   const a=$("#acct");
   if(session)a.innerHTML=`<div>${esc(me.name||me.email)}</div>${role?`<span class="role">${role==="admin"?"Admin":role==="scorekeeper"?"Scorekeeper":"Parent"}</span>`:""}<div><a href="#account">My account</a> · <a href="#" data-signout>Sign out</a></div>`;
   else a.innerHTML="";
+  $("#rq-form").hidden=!!session;
   const st=$("#si-state");
   if(session&&!role)st.textContent=`You're signed in as ${me.email}, but this account isn't on the ${S.team.name} team yet. Ask the team admin to add you.`;
   else st.textContent="";
@@ -326,7 +327,7 @@ function ytId(u){const m=String(u).match(/(?:youtu\.be\/|youtube\.com\/(?:watch\
 async function renderPhotos(){
   const note=$("#ph-note"),gal=$("#gallery");
   $("#ph-game").innerHTML=`<option value="">None</option>`+[...S.games].sort((a,b)=>b.date.localeCompare(a.date)).map(g=>`<option value="${g.id}">${dParts(g.date).m} ${dParts(g.date).d} ${g.home?"vs":"at"} ${esc(g.opp)}</option>`).join("");
-  if(!role){note.textContent=session?"Your account isn't on this team yet, so photos stay hidden. Ask the team admin to add you.":"Team photos and videos are for families on the team. Sign in to see them.";gal.innerHTML="";return;}
+  if(!role){note.innerHTML=session?"Your account isn't on this team yet, so photos stay hidden. Ask the team admin to add you.":`Team photos and videos are for families on the team. <a href="#signin">Sign in or request a login</a> to see them.`;gal.innerHTML="";return;}
   note.textContent="Visible only to signed-in team members.";
   gal.innerHTML=`<p class="note">Loading…</p>`;
   try{
@@ -469,6 +470,47 @@ $("#sp-off").onclick=async()=>{
   catch(e){setStatus(st,e.message,"err");}
 };
 
+// ---------- access requests ----------
+$("#rq-form").addEventListener("submit",async e=>{
+  e.preventDefault();const st=$("#rq-status");
+  if($("#rq-web").value){setStatus(st,"Request sent.","ok");return;} // spam trap
+  const row={team_id:TEAM.id,name:$("#rq-name").value.trim(),email:$("#rq-email").value.trim().toLowerCase(),player:$("#rq-player").value.trim(),role:$("#rq-role").value,note:$("#rq-note").value.trim()};
+  if(!row.name||!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(row.email)){setStatus(st,"Enter your name and a valid email.","err");return;}
+  $("#rq-go").disabled=true;setStatus(st,"Sending…");
+  const {error}=await sb.from("access_requests").insert(row);
+  $("#rq-go").disabled=false;
+  if(error){setStatus(st,/relation|does not exist|schema cache/i.test(error.message)?"Requests aren't set up on this site yet. Ask the team admin directly.":"Couldn't send that. Try again in a minute.","err");return;}
+  $("#rq-form").reset();setStatus(st,`Request sent. The ${S.team.name} admin will send you a login.`,"ok");
+});
+let requests=[];
+async function loadRequests(){
+  if(!isAdmin)return;
+  const {data,error}=await sb.from("access_requests").select("*").eq("team_id",TEAM.id).eq("status","pending").order("created_at");
+  requests=error?[]:data;
+  const a=$('nav.tabs a[data-v="admin"]');if(a)a.textContent=requests.length?`Admin (${requests.length})`:"Admin";
+  const list=$("#rq-list");if(!list)return;
+  if(error){list.innerHTML=`<p class="note">Requests aren't set up yet. Run supabase/003_access_requests.sql in Supabase.</p>`;return;}
+  list.innerHTML=requests.length?`<div class="tbl-wrap"><table class="members"><thead><tr><th class="l">Name</th><th class="l">Email</th><th class="l">Player</th><th class="l">Role</th><th class="l"></th></tr></thead><tbody>${requests.map(r=>`<tr><td class="l">${esc(r.name)}${r.note?`<div class="note">${esc(r.note)}</div>`:""}</td><td class="l">${esc(r.email)}</td><td class="l">${esc(r.player)}</td><td class="l"><select data-rqrole="${r.id}" aria-label="Role for ${esc(r.name)}">${["parent","scorekeeper","admin"].map(x=>`<option value="${x}" ${r.role===x?"selected":""}>${x[0].toUpperCase()+x.slice(1)}</option>`).join("")}</select></td><td class="l"><button class="linkbtn" data-rqok="${r.id}">Approve</button> · <button class="linkbtn" data-rqno="${r.id}">Decline</button></td></tr>`).join("")}</tbody></table></div>`:`<p class="note">No requests waiting. Visitors can ask for a login from the Sign in page.</p>`;
+}
+$("#rq-list").addEventListener("click",async e=>{
+  const b=e.target.closest("[data-rqok],[data-rqno]");if(!b)return;const st=$("#rq-astatus");
+  const r=requests.find(x=>x.id===(b.dataset.rqok||b.dataset.rqno));if(!r)return;
+  try{
+    if(b.dataset.rqok){
+      const role=$(`[data-rqrole="${r.id}"]`).value,pw=genPw();setStatus(st,"Creating their login…");
+      const res=await api("/api/admin",{action:"add",team_id:TEAM.id,name:r.name,email:r.email,role,password:pw});
+      await q(sb.from("access_requests").update({status:"approved"}).eq("id",r.id));
+      setStatus(st,res.created?`Approved ${r.name}.`:`Approved ${r.name}. They already had a login, so their password didn't change.`,"ok");
+      if(res.created)showPw(`${r.name} (${r.email})`,pw);
+      logAct(`Approved access for ${r.name} as ${role}`);renderAdmin();
+    }else{
+      await q(sb.from("access_requests").update({status:"declined"}).eq("id",r.id));
+      setStatus(st,`Declined ${r.name}.`,"ok");logAct(`Declined access request from ${r.name}`);
+    }
+    loadRequests();
+  }catch(err){setStatus(st,err.message||errText(err),"err");}
+});
+
 // ---------- routing ----------
 const VIEWS=["schedule","live","stats","roster","photos","scorebook","sheet","admin","signin","account","teams"];
 function route(){
@@ -483,7 +525,7 @@ function route(){
   for(const x of VIEWS)$("#v-"+x).hidden=x!==v;
   $$("nav.tabs a").forEach(a=>a.getAttribute("data-v")===v?a.setAttribute("aria-current","page"):a.removeAttribute("aria-current"));
   if(!TEAM)return;
-  if(v==="admin"){renderAdmin();renderSpondAdmin();}
+  if(v==="admin"){renderAdmin();renderSpondAdmin();loadRequests();}
   if(v==="photos")renderPhotos();
   if(v==="live")startLive();
   if(v==="scorebook"){renderEntryGames(pendingEnter);if(pendingData){fillEntry(pendingData);setStatus($("#eg-status"),"Box score built from live scoring. Check it, then press Save game.","ok");}}
@@ -840,13 +882,13 @@ async function boot(){
   lsSet("rr-team",TEAM.id);
   await loadTeamData();
   const {data}=await sb.auth.getSession();session=data.session;
-  await refreshRole();render();route();
+  await refreshRole();render();route();loadRequests();
   fetch("/api/ai").then(r=>r.ok?r.json():{enabled:false}).then(j=>{aiEnabled=!!j.enabled;renderSchedule();$("#scan-run").disabled=!(aiEnabled&&$("#scan-file").files.length);
     if(!aiEnabled)$("#scan-status").textContent="Photo reading is turned off for this site. Enter numbers in the tables below.";}).catch(()=>{});
   // Supabase can deadlock if its own calls are awaited inside this callback, so defer the work.
   sb.auth.onAuthStateChange((ev,sess)=>{
     if(ev==="INITIAL_SESSION"||ev==="TOKEN_REFRESHED"){session=sess;return;}
-    setTimeout(async()=>{session=sess;await refreshRole();render();route();},0);
+    setTimeout(async()=>{session=sess;await refreshRole();render();route();loadRequests();},0);
   });
 }
 boot();
