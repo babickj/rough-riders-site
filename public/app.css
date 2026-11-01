@@ -306,3 +306,20 @@ body:not(.is-coach) .coach-only{display:none!important}
 .also .f-label{width:100%}
 .also label{display:inline-flex;gap:6px;align-items:center}
 .also input{width:16px;height:16px;accent-color:var(--red)}
+
+/* ---- tryouts ---- */
+.ty-row{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;border-top:1px solid var(--line);padding:8px 0}
+.ty-board td{white-space:nowrap}
+.ty-board td.l{white-space:normal}
+.score-grid{display:grid;grid-template-columns:110px 1fr;gap:8px 12px;align-items:center}
+.score-grid .seg button{min-width:44px;padding:8px 10px;font-size:16px}
+.ty-msg textarea{min-height:120px}
+a.btn{display:inline-flex;align-items:center;text-decoration:none}
+details.panel>summary{font-family:var(--f-head);text-transform:uppercase;letter-spacing:.06em;font-weight:700;font-size:16px;color:var(--muted)}
+
+@media print{
+  body.print-pcl *{visibility:hidden}
+  body.print-pcl #pl-log-box,body.print-pcl #pl-log-box *{visibility:visible}
+  body.print-pcl #pl-log-box{position:absolute;left:0;top:0;width:100%;border:0}
+  body.print-pcl #pl-log-box .row{display:none}
+}

@@ -29,6 +29,7 @@
   <a href="#stats" data-v="stats">Stats</a>
   <a href="#roster" data-v="roster">Roster</a>
   <a href="#photos" data-v="photos">Photos</a>
+  <a href="#tryouts" data-v="tryouts" id="nav-tryouts" hidden>Tryouts</a>
   <a href="#scorebook" data-v="scorebook" class="edit-only">Enter game</a>
   <a href="#sheet" data-v="sheet" class="edit-only">Scoresheet</a>
   <a href="#admin" data-v="admin" class="owner-only">Admin</a>
@@ -41,6 +42,12 @@
     <div class="sec-head"><h2>Schedule</h2>
       <span class="row edit-only"><button type="button" id="add-game">Add game</button><button type="button" id="add-event">Add event</button><button type="button" id="sp-sync" hidden>Sync with Spond</button><button type="button" id="open-import">Paste a schedule</button></span></div>
     <p class="note" id="sp-line" hidden></p>
+    <details class="panel" id="cal-box"><summary>Add this schedule to your phone's calendar</summary>
+      <p class="note">Subscribe once and new games, time changes, rainouts, and events show up in your calendar on their own (phones check every few hours).</p>
+      <div class="row"><a class="btn primary" id="cal-sub" href="#">Subscribe on this phone</a><button type="button" id="cal-copy">Copy calendar link</button><span class="status" id="cal-status"></span></div>
+      <p class="note"><b>iPhone:</b> tap Subscribe, then Subscribe again. <b>Google Calendar:</b> on a computer, open Google Calendar, then Other calendars, the + button, From URL, and paste the copied link.</p>
+      <p class="note">Link: <span id="cal-url" style="user-select:all;overflow-wrap:anywhere"></span></p>
+    </details>
     <div id="import-panel" class="panel edit-only" hidden>
       <h3>Paste a schedule</h3>
       <p class="note">Copy the schedule from anywhere (an email, a spreadsheet, the school's website, or Spond) and paste it here. The AI picks out the games and other events like tryouts and meetings, with dates, times, opponents, and fields, and shows them for you to check before anything is added.</p>
@@ -56,6 +63,7 @@
         <label class="f">Time<input type="text" id="gf-time" placeholder="10:00" style="width:90px"></label>
         <label class="f"><span id="gf-opp-label">Opponent</span><input type="text" id="gf-opp"></label>
         <label class="f" id="gf-home-wrap">Home/Away<select id="gf-home"><option value="1">Home</option><option value="0">Away</option></select></label>
+        <label class="f" id="gf-st-wrap">Status<select id="gf-st"><option value="scheduled">On</option><option value="postponed">Postponed</option><option value="cancelled">Cancelled / rained out</option></select></label>
         <label class="f">Field<input type="text" id="gf-loc"></label>
       </div>
       <div class="row"><button class="primary" type="button" id="gf-save">Save</button><button type="button" id="gf-cancel">Cancel</button><button type="button" id="gf-delete" hidden>Delete</button><span class="status" id="gf-status"></span></div>
@@ -77,6 +85,16 @@
     <div class="tbl-wrap"><table id="stat-table"></table></div>
     <div class="tbl-wrap" id="team-games-wrap" hidden><table id="team-games"></table></div>
     <p class="note" id="stat-note"></p>
+    <details class="panel coach-only" id="pl-log-box">
+      <summary>Pitch count log</summary>
+      <p class="note">Every pitching outing with pitches, innings, and when the pitcher is rested, ready to send to your league or print.</p>
+      <div class="row">
+        <label class="f">From<input type="date" id="pcl-from"></label><label class="f">To<input type="date" id="pcl-to"></label>
+        <label class="row" style="gap:6px"><input type="checkbox" id="pcl-out" style="width:18px;height:18px;accent-color:var(--red)"> Include games outside the team</label>
+        <button type="button" id="pcl-csv">Download spreadsheet (CSV)</button><button type="button" id="pcl-print">Print</button>
+      </div>
+      <div class="tbl-wrap"><table id="pcl-table"></table></div>
+    </details>
     <div class="panel coach-only">
       <div class="sec-head" style="margin:0"><h3>Team review</h3><button type="button" class="primary" id="tr-run">Run team review</button></div>
       <p class="note">Reads every player's latest write-up and the team totals, then suggests what to work on as a team and a 90-minute practice plan.</p>
@@ -141,6 +159,7 @@
       <div id="gd-out" class="coach-only"></div>
       <p class="note">Check who is playing and set the batting order with the arrows. The stat tables and the printed scoresheet follow this lineup. Save it before the game to print a sheet with the right order.</p>
       <ol class="lineup" id="lineup"></ol>
+      <div class="row" id="cu-row" hidden><label class="f">Call up a player from another squad<select id="cu-pick"></select></label><button type="button" id="cu-add">Add to this game</button></div>
       <span class="status" id="lu-status"></span>
       <div id="lu-out"></div>
     </div>
@@ -299,6 +318,51 @@
       </details>
     </div>
     <div class="coach-only"><h3 style="margin-bottom:8px">Photos and videos</h3><div class="gallery" id="pl-gallery"></div></div>
+    <div class="panel coach-only" id="rc-panel">
+      <div class="sec-head" style="margin:0"><h3>Recruiting profile</h3><span class="note" id="rc-state"></span></div>
+      <p class="note">A one-page profile for college coaches, shared only by its private link. Turn it on only after the family agrees. Turning it off, or making a new link, stops the old link working.</p>
+      <label class="row" style="gap:8px;font-weight:600"><input type="checkbox" id="rc-on" style="width:18px;height:18px;accent-color:var(--red)"> The family agreed to share this profile</label>
+      <div id="rc-link" class="row" hidden><a class="btn" id="rc-open" href="#" target="_blank" rel="noopener">Open profile</a><button type="button" id="rc-copy">Copy link</button><button type="button" id="rc-new">Make a new link</button></div>
+      <div class="row">
+        <label class="f">Full name<input type="text" id="rc-full_name" maxlength="80"></label>
+        <label class="f">Grad year<input type="number" id="rc-grad_year" min="2020" max="2040" style="width:90px"></label>
+        <label class="f">Positions<input type="text" id="rc-positions" maxlength="60" placeholder="SS, RHP"></label>
+        <label class="f">Bats<input type="text" id="rc-bats" maxlength="5" style="width:60px" placeholder="R"></label>
+        <label class="f">Throws<input type="text" id="rc-throws" maxlength="5" style="width:60px" placeholder="R"></label>
+      </div>
+      <div class="row">
+        <label class="f">Height (optional)<input type="text" id="rc-height" maxlength="10" style="width:90px" placeholder="5'11&quot;"></label>
+        <label class="f">Weight (optional)<input type="text" id="rc-weight" maxlength="10" style="width:90px"></label>
+        <label class="f">GPA (optional)<input type="text" id="rc-gpa" maxlength="10" style="width:80px"></label>
+        <label class="f">School<input type="text" id="rc-school" maxlength="80"></label>
+      </div>
+      <label class="f">About (bio)<textarea id="rc-bio" maxlength="2000"></textarea></label>
+      <div class="row"><button type="button" id="rc-ai-bio">Draft bio with AI</button><button type="button" id="rc-ai-email">Draft intro email with AI</button></div>
+      <div id="rc-email-out" hidden class="stack" style="gap:6px"><label class="f">Intro email draft (edit, then copy)<textarea id="rc-email" style="min-height:180px"></textarea></label><div class="row"><button type="button" id="rc-email-copy">Copy email</button></div></div>
+      <div class="row">
+        <label class="f">Highlight clip<select id="rc-highlight"></select></label>
+        <label class="f" style="flex:1;min-width:200px">or YouTube link<input type="url" id="rc-highlight_url"></label>
+      </div>
+      <div class="row">
+        <label class="f">Contact name<input type="text" id="rc-contact_name" maxlength="80"></label>
+        <label class="f">Contact email<input type="email" id="rc-contact_email" maxlength="200"></label>
+        <label class="row" style="gap:6px"><input type="checkbox" id="rc-show_stats" style="width:18px;height:18px;accent-color:var(--red)"> Show stats</label>
+        <label class="row" style="gap:6px"><input type="checkbox" id="rc-show_measurements" style="width:18px;height:18px;accent-color:var(--red)"> Show measurements</label>
+      </div>
+      <div class="row"><button type="button" class="primary" id="rc-save">Save profile</button><span class="status" id="rc-status"></span></div>
+    </div>
+    <div class="panel coach-only" id="sc-panel">
+      <h3>Showcases and camps</h3>
+      <div id="sc-list"></div>
+      <div class="row">
+        <label class="f">Date<input type="date" id="sc-date"></label>
+        <label class="f" style="flex:1;min-width:180px">Event<input type="text" id="sc-title" maxlength="120" placeholder="Perfect Game Showcase"></label>
+        <label class="f">Where<input type="text" id="sc-loc" maxlength="80"></label>
+        <button type="button" id="sc-add">Add</button>
+      </div>
+      <p class="note">Upcoming ones show on the recruiting profile. Afterward, log results with Add a game outside the team or Add a measurement.</p>
+      <span class="status" id="sc-status"></span>
+    </div>
     <div class="panel coach-only" id="pl-notes-panel">
       <h3>Coach notes</h3>
       <p class="note">Only this team's coaches and admins can see these notes. Write them as if the family might read them someday.</p>
@@ -308,6 +372,25 @@
         <div class="row"><button class="primary" type="submit">Save note</button><span class="status" id="pl-note-status"></span></div>
       </form>
       <div id="pl-notes"></div>
+    </div>
+  </section>
+
+  <section id="v-tryouts" class="stack" hidden>
+    <div class="sec-head"><h2>Tryouts</h2></div>
+    <div id="ty-public" class="stack"></div>
+    <div class="coach-only stack" id="ty-coach">
+      <div class="panel">
+        <h3>Tryouts</h3>
+        <div id="ty-list"></div>
+        <div class="row">
+          <label class="f">Title<input type="text" id="ty-title" maxlength="80" placeholder="Spring tryouts"></label>
+          <label class="f">Date<input type="date" id="ty-date"></label>
+          <label class="f">Where<input type="text" id="ty-loc" maxlength="80"></label>
+          <button type="button" class="primary" id="ty-add">Create tryout</button>
+        </div>
+        <span class="status" id="ty-status"></span>
+      </div>
+      <div id="ty-board" class="stack"></div>
     </div>
   </section>
 

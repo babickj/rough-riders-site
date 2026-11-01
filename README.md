@@ -93,10 +93,24 @@ Run `supabase/009_school_events_reveal.sql` once.
 - **Roster posting** (Roster tab, coaches) hides the roster from visitors until a set time, enforced by the database; visitors see a countdown.
 - **Announcement banner** in Team settings shows on the team's pages (good for the off-season).
 
+### 11. High school tools
+Run `supabase/010_hs_tools.sql` once.
+- **Tryouts** tab: create a tryout, open sign-ups (public form; only coaches see entries), score players 1-5 on phones
+  (averaged across coaches), AI summary, place each player on a squad (adds them to that roster; use roster posting to keep it
+  private), and a ready-to-send message for each family.
+- **Recruiting profile** on a player page: off until the family agrees; shared only by a private link (`/r/<token>`) with a
+  printable page; AI drafts the bio and an intro email. **Showcases and camps** list on the player page and the profile.
+- **Pitch count log** (Stats tab): every outing with rest days, CSV download and print.
+- **Call-ups** (Enter game lineup): add a player from another squad of the same school; stats count for the team they played for.
+- **Rainouts**: a game's status can be Postponed or Cancelled.
+- **Calendar feed** `/cal/<team>.ics`: families subscribe once (Schedule tab) and get changes automatically.
+- `hostSchools` in `public/config.js` limits an address to one school's squads.
+
 ### Later: your own web address
-In the Worker, **Settings > Domains & Routes > Add > Custom domain**. For one address per team, add each one and map it in `config.js`:
+In the Worker, **Settings > Domains & Routes > Add > Custom domain**. Map each address in `public/config.js`, to one team or to one school's squads:
 ```js
-hostTeams: { "riders.example.com": "rough-riders", "team2.example.com": "team-two" }
+hostTeams: { "riders.example.com": "rough-riders" },
+hostSchools: { "otayranchbaseball.com": "Otay Ranch HS" }
 ```
 Without that, each team is reachable at `/<web-name>`.
 

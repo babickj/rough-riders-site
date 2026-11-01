@@ -215,6 +215,8 @@ function gameRowHtml(g){
   if(isEvent(g))return eventRowHtml(g);
   const p=dParts(g.date); let res="";
   if(g.status==="final"&&g.us!=null){const k=g.us>g.them?"w":g.us<g.them?"l":"t";res=`<span class="pill ${k}">${k.toUpperCase()}</span>${g.us}–${g.them}`;}
+  else if(g.status==="cancelled")res=`<span class="pill l">Cancelled</span>`;
+  else if(g.status==="postponed")res=`<span class="pill t">Postponed</span>`;
   else res=`<span class="pill up">${esc(g.time)}</span>`;
   const actions=[isCoach&&S.lines[g.id]?`<button class="linkbtn" data-box="${g.id}">Box score</button>`:"",canEdit?`<button class="linkbtn" data-edit="${g.id}">Edit</button>`:"",canEdit?`<button class="linkbtn" data-enter="${g.id}">Enter stats</button>`:""].filter(Boolean).join(" · ");
   return `<div class="game"><div class="gdate"><div class="m">${dow(g.date)} ${p.m}</div><div class="d">${p.d}</div></div>
@@ -236,17 +238,18 @@ function ago(ts){const m=Math.round((Date.now()-new Date(ts))/6e4);if(m<1)return
 async function reloadTeam(){const t=await q(sb.from("teams").select("*").eq("id",TEAM.id));if(t[0])Object.assign(TEAM,t[0]);await loadTeamData();render();}
 function syncSummary(r){const parts=[];if(r.added)parts.push(`${r.added} new`);if(r.updated)parts.push(`${r.updated} updated`);if(r.removed)parts.push(`${r.removed} cancelled game${r.removed>1?"s":""} removed`);return parts.length?`Synced: ${parts.join(", ")}.`:"Synced. No games found in Spond yet.";}
 let editingGame=null;
-function setFormKind(k){const ev=k==="event";$("#gf-kind").value=k;$("#gf-opp-label").textContent=ev?"What":"Opponent";$("#gf-opp").placeholder=ev?"Tryouts":"";$("#gf-home-wrap").hidden=ev;
+function setFormKind(k){const ev=k==="event";$("#gf-kind").value=k;$("#gf-opp-label").textContent=ev?"What":"Opponent";$("#gf-opp").placeholder=ev?"Tryouts":"";$("#gf-home-wrap").hidden=ev;$("#gf-st-wrap").hidden=ev;
   $("#game-form-title").textContent=(editingGame?"Edit ":"Add ")+(ev?"event":"game");}
 function openGameForm(g,kind){
   editingGame=g?g.id:null;$("#game-form").hidden=false;setFormKind(g?(isEvent(g)?"event":"game"):(kind||"game"));$("#gf-kind").disabled=!!(g&&!isEvent(g)&&S.lines[g.id]);
+  $("#gf-st").value=g&&["postponed","cancelled"].includes(g.status)?g.status:"scheduled";$("#gf-st-wrap").hidden=$("#gf-st-wrap").hidden||!!(g&&g.status==="final");
   $("#gf-date").value=g?g.date:today();$("#gf-time").value=g?g.time:"";$("#gf-opp").value=g?g.opp:"";$("#gf-home").value=g&&!g.home?"0":"1";$("#gf-loc").value=g?g.loc:"";
   $("#gf-delete").hidden=!g;setStatus($("#gf-status"),"");$("#gf-opp").focus();
 }
 
 // ---------- stats view ----------
 let statType="bat", sortKey={bat:"avg",pit:"era",fld:"tc"}, sortDir={bat:-1,pit:1,fld:-1};
-function pRow(pid){return S.players.find(p=>p.id===pid)||{num:"",name:"(removed)"};}
+function pRow(pid){const p=S.players.find(p=>p.id===pid);return p?(p.call_up_of?{...p,name:p.name+" (call-up)"}:p):{num:"",name:"(removed)"};}
 // Team-level stats for everyone who isn't a coach: totals and a line per game, no player names.
 function teamLines(){
   const out={};
@@ -344,7 +347,7 @@ function activeLineup(){return curLineup?curLineup.order.filter(id=>curLineup.on
 function renderLineup(){
   let n=0;
   $("#lineup").innerHTML=curLineup.order.map(id=>{const p=S.players.find(p=>p.id===id);if(!p)return "";const on=curLineup.on.has(id);
-    return `<li class="${on?"":"out"}"><span class="ord">${on?++n:"–"}</span><input type="checkbox" id="lu-${id}" data-lu-on="${id}" ${on?"checked":""} aria-label="${esc(p.name)} is playing"><span class="jersey" style="font-size:20px;min-width:0">${p.num}</span><label for="lu-${id}">${esc(p.name)}</label><span class="arr"><button type="button" data-lu-up="${id}" aria-label="Move ${esc(p.name)} up">↑</button><button type="button" data-lu-dn="${id}" aria-label="Move ${esc(p.name)} down">↓</button></span></li>`}).join("")||`<li class="note">Add players on the Roster tab first.</li>`;
+    return `<li class="${on?"":"out"}"><span class="ord">${on?++n:"–"}</span><input type="checkbox" id="lu-${id}" data-lu-on="${id}" ${on?"checked":""} aria-label="${esc(p.name)} is playing"><span class="jersey" style="font-size:20px;min-width:0">${p.num}</span><label for="lu-${id}">${esc(p.name)}${p.call_up_of?' <span class="note">(call-up)</span>':""}</label><span class="arr"><button type="button" data-lu-up="${id}" aria-label="Move ${esc(p.name)} up">↑</button><button type="button" data-lu-dn="${id}" aria-label="Move ${esc(p.name)} down">↓</button></span></li>`}).join("")||`<li class="note">Add players on the Roster tab first.</li>`;
 }
 function rebuildTables(){
   const snap={};$$("#eb-table input,#ep-table input,#ef-table input").forEach(i=>snap[i.id]=i.value);
@@ -354,7 +357,7 @@ function rebuildTables(){
 function fillEntry(data){
   const g=curGame();
   $("#eg-us").value=data&&data.us!=null?data.us:(g&&g.us!=null?g.us:"");$("#eg-them").value=data&&data.them!=null?data.them:(g&&g.them!=null?g.them:"");
-  if(!data){loadLineup();renderLineup();}
+  if(!data){loadLineup();renderLineup();loadCallups();}
   buildTables(data||S.lines[g&&g.id]||{bat:{},pit:{}},data);
 }
 function buildTables(L,data){
@@ -596,7 +599,7 @@ function renderPlayer(pid){
     return `<tr class="${r.kind}"><td class="l">${fmtDay(r.date)} ${esc(r.label)}</td><td>${r.res}</td><td>${bs}</td><td>${ps}</td><td>${fs}</td>${canDel?`<td>${r.kind==="outside"?`<button class="linkbtn" data-ogdel="${r.id}">Delete</button>`:""}</td>`:""}</tr>`;}).join("")+`</tbody>`:`<tbody><tr><td class="l note">No games yet.</td></tr></tbody>`;
   if(!isCoach)return;
   renderMedia($("#pl-gallery"),pid);renderMetrics(pid);renderNotes(pid);prepAddForms();
-  $("#pl-aiok").checked=!!p.ai_ok;renderWriteup(pid);
+  $("#pl-aiok").checked=!!p.ai_ok;renderWriteup(pid);renderRecruit(pid);renderShowcases(pid);
 }
 $("#pl-outside").addEventListener("change",()=>renderPlayer(curPlayer));
 
@@ -1182,8 +1185,325 @@ $("#rv-save").onclick=()=>{const v=$("#rv-at").value;if(!v){setStatus($("#rv-sta
   saveReveal(at.toISOString(),`Roster will post ${fmtWhen(at)}`);};
 $("#rv-now").onclick=()=>saveReveal(new Date().toISOString(),"Roster posted");
 
+// ================= TRYOUTS =================
+let tryouts=[],curTryout=null,tyPlayers=[],tyScores=[],tyFilter="all";
+const TOOLS=[["arm","Arm"],["speed","Speed"],["fielding","Fielding"],["hitting","Hitting"],["pitching","Pitching"]];
+const squads=()=>teams.filter(t=>t.id===TEAM.id||(TEAM.school&&t.school===TEAM.school)).sort((a,b)=>a.name.localeCompare(b.name));
+const tyName=x=>`${x.first_name} ${x.last_name}`;
+function sheet(html){let s=$("#gen-sheet");if(!s){s=document.createElement("div");s.id="gen-sheet";s.className="sheet-ov";s.innerHTML=`<div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="gen-title"></div>`;document.body.appendChild(s);
+  s.addEventListener("click",e=>{if(e.target===s||e.target.closest("[data-close]"))s.hidden=true;});}
+  s.querySelector(".sheet-card").innerHTML=html;s.hidden=false;const f=s.querySelector("button,input,textarea");if(f)f.focus();return s;}
+const closeSheetGen=()=>{const s=$("#gen-sheet");if(s)s.hidden=true;};
+async function updateTryoutNav(){
+  const r=await sb.from("tryouts").select("*").eq("team_id",TEAM.id).order("created_at",{ascending:false});
+  tryouts=r.error?[]:r.data;
+  $("#nav-tryouts").hidden=!(isCoach||tryouts.some(t=>t.signups_open));
+}
+function signupForm(open){
+  return `<form class="panel stack" id="ty-form" style="gap:10px;max-width:640px">
+    <h3>Sign up for ${esc(open.length===1?open[0].title:"tryouts")}</h3>
+    ${open.length>1?`<label class="f">Which tryout<select id="tyf-tryout">${open.map(t=>`<option value="${t.id}">${esc(t.title)}${t.date?" · "+esc(fmtDay(t.date)):""}</option>`).join("")}</select></label>`:`<p class="note">${open[0].date?esc(new Date(open[0].date+"T12:00").toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric"})):""}${open[0].location?" · "+esc(open[0].location):""}</p>`}
+    <div class="row"><label class="f">Player first name<input id="tyf-first" maxlength="40" required></label><label class="f">Last name<input id="tyf-last" maxlength="40" required></label>
+      <label class="f">Grade<select id="tyf-grade"><option>9</option><option>10</option><option>11</option><option>12</option><option value="">Other</option></select></label></div>
+    <div class="row"><label class="f" style="flex:1;min-width:160px">Positions<input id="tyf-pos" maxlength="60" placeholder="SS, 2B, RHP"></label>
+      <label class="f">Bats<select id="tyf-bats"><option>R</option><option>L</option><option>S</option></select></label><label class="f">Throws<select id="tyf-throws"><option>R</option><option>L</option></select></label></div>
+    <div class="row"><label class="f">Parent or guardian name<input id="tyf-pname" maxlength="80" required></label><label class="f">Parent email<input type="email" id="tyf-pemail" maxlength="200" required></label><label class="f">Phone (optional)<input type="tel" id="tyf-pphone" maxlength="30"></label></div>
+    <label class="f">Anything the coaches should know (optional)<input id="tyf-note" maxlength="300"></label>
+    <label class="f" style="position:absolute;left:-9999px" aria-hidden="true">Website<input id="tyf-web" tabindex="-1" autocomplete="off"></label>
+    <p class="note">Only the coaching staff sees this information. It's used for tryouts and to let you know the results.</p>
+    <div class="row"><button class="primary" type="submit">Sign up</button><span class="status" id="tyf-status"></span></div>
+  </form>`;
+}
+document.addEventListener("submit",async e=>{
+  if(e.target.id!=="ty-form")return;e.preventDefault();const st=$("#tyf-status");
+  if($("#tyf-web").value){setStatus(st,"You're signed up.","ok");return;}
+  const open=tryouts.filter(t=>t.signups_open),tid=$("#tyf-tryout")?$("#tyf-tryout").value:open[0].id;
+  const row={tryout_id:tid,team_id:TEAM.id,first_name:$("#tyf-first").value.trim(),last_name:$("#tyf-last").value.trim(),grade:$("#tyf-grade").value,positions:$("#tyf-pos").value.trim(),
+    bats:$("#tyf-bats").value,throws:$("#tyf-throws").value,parent_name:$("#tyf-pname").value.trim(),parent_email:$("#tyf-pemail").value.trim(),parent_phone:$("#tyf-pphone").value.trim(),family_note:$("#tyf-note").value.trim()};
+  if(!row.first_name||!row.last_name||!row.parent_name||!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(row.parent_email)){setStatus(st,"Fill in the player's name, a parent's name, and a valid email.","err");return;}
+  const {error}=await sb.from("tryout_players").insert(row);
+  if(error){setStatus(st,"Couldn't sign up. Sign-ups may have closed; check with the coach.","err");return;}
+  e.target.reset();setStatus(st,`${row.first_name} is signed up. See you at tryouts!`,"ok");
+});
+async function renderTryouts(){
+  await updateTryoutNav();
+  const open=tryouts.filter(t=>t.signups_open);
+  if(!isCoach){$("#ty-public").innerHTML=open.length?signupForm(open):`<p class="note">Tryout sign-ups aren't open right now.</p>`;return;}
+  $("#ty-public").innerHTML=open.length?`<p class="note">Sign-ups are open. Families sign up on this page: <span style="user-select:all">${esc(location.origin+location.pathname)}#tryouts</span></p>`:"";
+  $("#ty-list").innerHTML=tryouts.map(t=>`<div class="ty-row"><div><b>${esc(t.title)}</b> <span class="note">${t.date?esc(fmtDay(t.date)):""}${t.location?" · "+esc(t.location):""}</span>${t.signups_open?` <span class="chip ok">Sign-ups open</span>`:""}</div>
+    <div class="row"><button data-ty="board" data-id="${t.id}" class="${curTryout===t.id?"primary":""}">Open board</button><button data-ty="toggle" data-id="${t.id}">${t.signups_open?"Close sign-ups":"Open sign-ups"}</button><button data-ty="del" data-id="${t.id}">Delete</button></div></div>`).join("")||`<p class="note">No tryouts yet. Create one below; open sign-ups when you're ready for families to register.</p>`;
+  if(!curTryout&&tryouts[0])curTryout=tryouts[0].id;
+  renderBoard();
+}
+const avg=a=>a.length?a.reduce((s,x)=>s+x,0)/a.length:null;
+function tyStats(x){
+  const sc=tyScores.filter(s=>s.tryout_player_id===x.id),o={n:sc.length};
+  for(const [k] of TOOLS)o[k]=avg(sc.map(s=>s[k]).filter(v=>v!=null));
+  const t=TOOLS.map(([k])=>o[k]).filter(v=>v!=null);o.overall=t.length?avg(t):null;
+  const nums=k=>sc.map(s=>s[k]).filter(v=>v!=null).map(Number);
+  o.sixty=nums("sixty").length?Math.min(...nums("sixty")):null;o.velo=nums("velo").length?Math.max(...nums("velo")):null;o.pop=nums("pop").length?Math.min(...nums("pop")):null;
+  o.notes=sc.filter(s=>s.note).map(s=>`${s.coach_name||"Coach"}: ${s.note}`);
+  return o;
+}
+async function renderBoard(){
+  const box=$("#ty-board");const t=tryouts.find(x=>x.id===curTryout);if(!t){box.innerHTML="";return;}
+  const [a,b]=await Promise.all([sb.from("tryout_players").select("*").eq("tryout_id",t.id).order("last_name"),sb.from("tryout_scores").select("*").eq("team_id",TEAM.id)]);
+  if(a.error){box.innerHTML=`<p class="status err">${esc(/tryout/.test(a.error.message)?"Tryouts aren't set up yet. Run supabase/010_hs_tools.sql in Supabase.":errText(a.error))}</p>`;return;}
+  tyPlayers=a.data;tyScores=b.data||[];
+  const f1=v=>v==null?"—":v.toFixed(1),sq=id=>(teams.find(x=>x.id===id)||{}).name||"";
+  let rows=tyPlayers.map(x=>({x,s:tyStats(x)}));
+  if(tyFilter==="open")rows=rows.filter(r=>r.x.status==="registered");
+  rows.sort((p,q)=>(q.s.overall??-1)-(p.s.overall??-1));
+  const placed=tyPlayers.filter(x=>x.status==="placed").length,cut=tyPlayers.filter(x=>x.status==="not_placed").length;
+  box.innerHTML=`<div class="panel stack" style="gap:10px">
+    <div class="sec-head" style="margin:0"><h3>${esc(t.title)}: ${tyPlayers.length} player${tyPlayers.length===1?"":"s"}</h3>
+      <div class="seg" role="group"><button data-tyf="all" aria-pressed="${tyFilter==="all"}">Everyone</button><button data-tyf="open" aria-pressed="${tyFilter==="open"}">Not decided</button></div></div>
+    <p class="note">${placed} placed, ${cut} not placed, ${tyPlayers.length-placed-cut} to decide. Scores are 1 to 5, averaged across every coach who scored the player. Tap Score on your phone during tryouts.</p>
+    <div class="tbl-wrap"><table class="ty-board"><thead><tr><th class="l">Player</th><th>Gr</th><th class="l">Pos</th><th>B/T</th>${TOOLS.map(([,l])=>`<th>${l}</th>`).join("")}<th>60 yd</th><th>Velo</th><th>Pop</th><th>Overall</th><th>Coaches</th><th class="l">Result</th><th></th></tr></thead><tbody>
+    ${rows.map(({x,s})=>`<tr><td class="l"><b>${esc(tyName(x))}</b>${x.ai_summary?`<div class="note" style="max-width:340px">${esc(x.ai_summary)}</div>`:""}</td><td>${esc(x.grade)}</td><td class="l">${esc(x.positions)}</td><td>${esc([x.bats,x.throws].filter(Boolean).join("/"))}</td>
+      ${TOOLS.map(([k])=>`<td>${f1(s[k])}</td>`).join("")}<td>${s.sixty??"—"}</td><td>${s.velo??"—"}</td><td>${s.pop??"—"}</td><td><b>${f1(s.overall)}</b></td><td>${s.n}</td>
+      <td class="l">${x.status==="placed"?`<span class="chip ok">${esc(sq(x.placed_team_id))}</span>`:x.status==="not_placed"?`<span class="chip rest">Not placed</span>`:""}</td>
+      <td class="l"><button class="linkbtn" data-ty="score" data-id="${x.id}">Score</button> · <button class="linkbtn" data-ty="place" data-id="${x.id}">Place</button> · <button class="linkbtn" data-ty="ai" data-id="${x.id}">AI summary</button>${x.status!=="registered"?` · <button class="linkbtn" data-ty="msg" data-id="${x.id}">Message family</button>`:""}</td></tr>`).join("")||`<tr><td class="l note" colspan="20">No one signed up yet. Open sign-ups, or add players below as they arrive.</td></tr>`}
+    </tbody></table></div>
+    <form class="row" id="ty-walk"><label class="f">First name<input id="tyw-first" maxlength="40"></label><label class="f">Last name<input id="tyw-last" maxlength="40"></label><label class="f">Grade<input id="tyw-grade" maxlength="5" style="width:60px"></label><label class="f">Positions<input id="tyw-pos" maxlength="60"></label><button type="submit">Add walk-up</button><span class="status" id="tyw-status"></span></form>
+  </div>`;
+}
+document.addEventListener("submit",async e=>{
+  if(e.target.id!=="ty-walk")return;e.preventDefault();const st=$("#tyw-status");
+  const row={tryout_id:curTryout,team_id:TEAM.id,first_name:$("#tyw-first").value.trim(),last_name:$("#tyw-last").value.trim(),grade:$("#tyw-grade").value.trim(),positions:$("#tyw-pos").value.trim()};
+  if(!row.first_name||!row.last_name){setStatus(st,"Enter a first and last name.","err");return;}
+  try{await q(sb.from("tryout_players").insert(row));renderBoard();}catch(err){setStatus(st,errText(err),"err");}
+});
+$("#ty-add").onclick=async()=>{
+  const st=$("#ty-status"),title=$("#ty-title").value.trim();if(!title){setStatus(st,"Give the tryout a title.","err");return;}
+  try{const r=await q(sb.from("tryouts").insert({team_id:TEAM.id,title,date:$("#ty-date").value||null,location:$("#ty-loc").value.trim()}).select());curTryout=r[0].id;$("#ty-title").value="";setStatus(st,"Tryout created. Open sign-ups when families can register.","ok");renderTryouts();}
+  catch(err){setStatus(st,/tryouts/.test(err.message||"")?"Tryouts aren't set up yet. Run supabase/010_hs_tools.sql in Supabase.":errText(err),"err");}
+};
+function scoreSheet(x){
+  const mine=tyScores.find(s=>s.tryout_player_id===x.id&&s.coach_id===me.id)||{};
+  const s=sheet(`<h2 id="gen-title">Score ${esc(tyName(x))}</h2><p class="note">${esc([x.grade?`Grade ${x.grade}`:"",x.positions,[x.bats,x.throws].filter(Boolean).join("/")].filter(Boolean).join(" · "))}${x.family_note?`<br>Family note: ${esc(x.family_note)}`:""}</p>
+    <div class="score-grid">${TOOLS.map(([k,l])=>`<span class="f-label">${l}</span><div class="seg" role="group" data-tool="${k}">${[1,2,3,4,5].map(v=>`<button type="button" data-v="${v}" aria-pressed="${mine[k]===v}">${v}</button>`).join("")}</div>`).join("")}</div>
+    <div class="row"><label class="f">60-yard (sec)<input type="number" step="0.01" id="sc-sixty" value="${mine.sixty??""}" style="width:90px"></label><label class="f">Velo (mph)<input type="number" step="0.1" id="sc-velo" value="${mine.velo??""}" style="width:90px"></label><label class="f">Pop time (sec)<input type="number" step="0.01" id="sc-pop" value="${mine.pop??""}" style="width:90px"></label></div>
+    <label class="f">Note<textarea id="sc-note" maxlength="500">${esc(mine.note||"")}</textarea></label>
+    <span class="status" id="sc-status2"></span>
+    <div class="row"><button class="primary big" type="button" id="sc-save" style="flex:1">Save score</button><button type="button" data-close>Cancel</button></div>`);
+  s.querySelectorAll("[data-tool]").forEach(g=>g.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;const on=b.getAttribute("aria-pressed")==="true";g.querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed","false"));if(!on)b.setAttribute("aria-pressed","true");}));
+  s.querySelector("#sc-save").onclick=async()=>{
+    const row={tryout_player_id:x.id,team_id:TEAM.id,coach_id:me.id,coach_name:me.name||me.email,note:$("#sc-note").value.trim(),updated_at:new Date().toISOString()};
+    s.querySelectorAll("[data-tool]").forEach(g=>{const b=g.querySelector('[aria-pressed="true"]');row[g.dataset.tool]=b?+b.dataset.v:null;});
+    for(const k of ["sixty","velo","pop"]){const v=$("#sc-"+k).value;row[k]=v===""?null:+v;}
+    try{await q(sb.from("tryout_scores").upsert(row,{onConflict:"tryout_player_id,coach_id"}));closeSheetGen();renderBoard();}
+    catch(err){setStatus($("#sc-status2"),errText(err),"err");}
+  };
+}
+function placeSheet(x){
+  const sqs=squads();
+  const s=sheet(`<h2 id="gen-title">Place ${esc(tyName(x))}</h2>
+    <p class="note">Placing adds ${esc(x.first_name)} to that squad's roster as "${esc(x.first_name)} ${esc(x.last_name.charAt(0))}." You can change the name and jersey number on the roster later.</p>
+    <div class="stack" style="gap:8px">${sqs.map(t=>{const hidden=t.roster_reveal_at&&new Date(t.roster_reveal_at)>new Date();return `<button type="button" class="${x.placed_team_id===t.id?"primary":""}" data-sq="${t.id}">${esc(t.name)}</button><span class="note">${hidden?`Roster posts ${esc(fmtWhen(t.roster_reveal_at))}; stays private until then.`:`<span class="flag">This roster is public right now.</span> Set a posting time on its Roster tab first to keep placements private.`}</span>`;}).join("")}
+      <button type="button" data-sq="none" class="${x.status==="not_placed"?"primary":""}">Not placed this season</button>
+      ${x.status!=="registered"?`<button type="button" data-sq="undo">Undo decision</button>`:""}</div>
+    <span class="status" id="pl-status2"></span><div class="row"><button type="button" data-close>Close</button></div>`);
+  s.querySelectorAll("[data-sq]").forEach(b=>b.onclick=async()=>{
+    const st=$("#pl-status2"),to=b.dataset.sq;
+    try{
+      if(x.placed_player_id){await sb.from("players").delete().eq("id",x.placed_player_id);}
+      if(to==="undo"){await q(sb.from("tryout_players").update({status:"registered",placed_team_id:null,placed_player_id:null}).eq("id",x.id));}
+      else if(to==="none"){await q(sb.from("tryout_players").update({status:"not_placed",placed_team_id:null,placed_player_id:null}).eq("id",x.id));}
+      else{const pr=await q(sb.from("players").insert({team_id:to,name:`${x.first_name} ${x.last_name.charAt(0)}.`,num:0,active:true}).select());
+        await q(sb.from("tryout_players").update({status:"placed",placed_team_id:to,placed_player_id:pr[0].id}).eq("id",x.id));
+        if(to===TEAM.id)S.players.push(pr[0]);}
+      logAct(`Tryout decision for ${tyName(x)}`);closeSheetGen();renderBoard();
+    }catch(err){setStatus(st,/row-level|permission/i.test(err.message||"")?"You need coach or admin access on that squad to place players there.":errText(err),"err");}
+  });
+}
+async function tyAi(x,btn){
+  if(!aiEnabled){alertBoard(AI_OFF);return;}
+  btn.disabled=true;btn.textContent="Thinking…";
+  const s=tyStats(x),sc=tyScores.filter(t=>t.tryout_player_id===x.id).map(t=>({coach:t.coach_name,arm:t.arm,speed:t.speed,fielding:t.fielding,hitting:t.hitting,pitching:t.pitching,sixty:t.sixty,velo:t.velo,pop:t.pop,note:t.note}));
+  const all=tyPlayers.map(y=>({o:tyStats(y).overall})).filter(y=>y.o!=null).map(y=>y.o).sort((a,b)=>b-a);
+  try{const out=await ai(`You are helping high school baseball coaches review tryouts. Summarize one player's tryout from the coaches' scores (1 to 5) and notes in 2 short sentences for the coaching staff, and suggest which squad fits based on how the player ranks.
+${COACH_RULES}
+Return ONLY JSON: {"summary":"","suggested_squad":"one of the squad names, or 'not placed'"}.
+SQUADS: ${JSON.stringify(squads().map(t=>t.name))}
+PLAYER: ${JSON.stringify({grade:x.grade,positions:x.positions,bats:x.bats,throws:x.throws,averages:{arm:s.arm,speed:s.speed,fielding:s.fielding,hitting:s.hitting,pitching:s.pitching,overall:s.overall},best_60:s.sixty,top_velo:s.velo,best_pop:s.pop})}
+EACH COACH: ${JSON.stringify(sc)}
+OVERALL SCORES OF EVERY PLAYER AT TRYOUTS (highest first): ${JSON.stringify(all.map(v=>+v.toFixed(2)))}`);
+    const txt=`${out.summary||""}${out.suggested_squad?` Suggested: ${out.suggested_squad}.`:""}`.trim();
+    await q(sb.from("tryout_players").update({ai_summary:txt}).eq("id",x.id));renderBoard();
+  }catch(e){btn.disabled=false;btn.textContent="AI summary";alertBoard(e.message);}
+}
+const alertBoard=t=>{const b=$("#ty-board .note");if(b){b.textContent=t;b.classList.add("flag");}};
+function msgSheet(x){
+  const sq=(teams.find(t=>t.id===x.placed_team_id)||{}).name||"",coach=me.name||"Coach",parent=x.parent_name?x.parent_name.split(" ")[0]:"";
+  const subj=x.status==="placed"?`${x.first_name} made ${sq}`:`${x.first_name}'s tryout`;
+  const body=x.status==="placed"?`Hi${parent?" "+parent:""},
+
+Congratulations! ${x.first_name} made the ${sq} team${S.team.season?` for ${S.team.season}`:""}. We were impressed at tryouts and are excited to have ${x.first_name} with us.
+
+We'll share the practice schedule and next steps soon. The team page has the schedule: ${teamUrl(x.placed_team_id)}
+
+${coach}`:`Hi${parent?" "+parent:""},
+
+Thank you for having ${x.first_name} try out. This was a tough group to choose from, and we weren't able to place ${x.first_name} on a team this season.
+
+That isn't the end of the road. Keep working, and we'd love to see ${x.first_name} at tryouts again. If you'd like to talk about what to work on, I'm happy to set up a time.
+
+${coach}`;
+  const s=sheet(`<h2 id="gen-title">Message ${esc(x.parent_name||"the family")}</h2>
+    <p class="note">${x.parent_email?`Email: <span style="user-select:all">${esc(x.parent_email)}</span>`:"No email on file."}${x.parent_phone?` · Phone: <span style="user-select:all">${esc(x.parent_phone)}</span>`:""}</p>
+    <p class="note">Edit the message, then copy it or open it in your email. ${x.status==="not_placed"?"Send these privately before the rosters post, so no family finds out from the website.":""}</p>
+    <div class="ty-msg"><label class="f">Subject<input id="msg-subj" value="${esc(subj)}"></label><label class="f">Message<textarea id="msg-body">${esc(body)}</textarea></label></div>
+    <span class="status" id="msg-status"></span>
+    <div class="row"><button class="primary" type="button" id="msg-copy">Copy message</button>${x.parent_email?`<a class="btn" id="msg-mail" href="#">Open in email</a>`:""}<button type="button" data-close>Close</button></div>`);
+  s.querySelector("#msg-copy").onclick=async()=>{try{await navigator.clipboard.writeText($("#msg-body").value);setStatus($("#msg-status"),"Copied.","ok");}catch(e){$("#msg-body").select();}};
+  const m=s.querySelector("#msg-mail");if(m)m.onclick=()=>{m.href=`mailto:${encodeURIComponent(x.parent_email)}?subject=${encodeURIComponent($("#msg-subj").value)}&body=${encodeURIComponent($("#msg-body").value)}`;};
+}
+document.addEventListener("click",async e=>{
+  const f=e.target.closest("[data-tyf]");if(f){tyFilter=f.dataset.tyf;renderBoard();return;}
+  const b=e.target.closest("[data-ty]");if(!b)return;const a=b.dataset.ty,id=b.dataset.id;
+  try{
+    if(a==="board"){curTryout=id;renderTryouts();}
+    else if(a==="toggle"){const t=tryouts.find(x=>x.id===id);await q(sb.from("tryouts").update({signups_open:!t.signups_open}).eq("id",id));logAct(`${t.signups_open?"Closed":"Opened"} tryout sign-ups`);renderTryouts();}
+    else if(a==="del"){if(b.dataset.armed!=="1"){b.dataset.armed="1";b.textContent="Tap again: deletes sign-ups and scores";return;}await q(sb.from("tryouts").delete().eq("id",id));if(curTryout===id)curTryout=null;renderTryouts();}
+    else{const x=tyPlayers.find(p=>p.id===id);if(!x)return;
+      if(a==="score")scoreSheet(x);else if(a==="place")placeSheet(x);else if(a==="ai")tyAi(x,b);else if(a==="msg")msgSheet(x);}
+  }catch(err){setStatus($("#ty-status"),errText(err),"err");}
+});
+
+// ================= RECRUITING PROFILE + SHOWCASES =================
+let rcRow=null;
+const RC_FIELDS=["full_name","grad_year","positions","bats","throws","height","weight","gpa","school","bio","highlight_url","contact_name","contact_email"];
+const newToken=()=>{const a=new Uint8Array(18);crypto.getRandomValues(a);return btoa(String.fromCharCode(...a)).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");};
+const rcUrl=t=>`${location.origin}/r/${t}`;
+async function renderRecruit(pid){
+  const p=S.players.find(x=>x.id===pid);
+  const [r,m]=await Promise.all([sb.from("recruit_profiles").select("*").eq("player_id",pid),
+    sb.from("media").select("id,kind,caption,created_at,path").eq("team_id",TEAM.id).contains("players",[pid]).not("path","is",null).order("created_at",{ascending:false}).limit(50)]);
+  if(r.error){$("#rc-state").textContent="";setStatus($("#rc-status"),/recruit/.test(r.error.message)?"Recruiting profiles aren't set up yet. Run supabase/010_hs_tools.sql in Supabase.":errText(r.error),"err");return;}
+  if(curPlayer!==pid)return;
+  rcRow=r.data[0]||null;const v=rcRow||{full_name:p.name,school:TEAM.school||"",contact_name:me.name||"",contact_email:me.email||"",show_stats:true,show_measurements:true};
+  for(const k of RC_FIELDS)$("#rc-"+k).value=v[k]??"";
+  $("#rc-show_stats").checked=v.show_stats!==false;$("#rc-show_measurements").checked=v.show_measurements!==false;
+  $("#rc-highlight").innerHTML=`<option value="">None</option>`+(m.data||[]).map(x=>`<option value="${x.id}" ${v.highlight_media_id===x.id?"selected":""}>${x.kind==="video"?"Clip":"Photo"} · ${esc(fmtDay(x.created_at.slice(0,10)))}${x.caption?" · "+esc(x.caption):""}</option>`).join("");
+  $("#rc-on").checked=!!(rcRow&&rcRow.enabled);
+  const live=rcRow&&rcRow.enabled&&rcRow.share_token;$("#rc-link").hidden=!live;
+  if(live)$("#rc-open").href=rcUrl(rcRow.share_token);
+  $("#rc-state").textContent=live?"Shared by link":"Off";
+  $("#rc-email-out").hidden=true;setStatus($("#rc-status"),"");
+}
+async function saveRecruit(opts={}){
+  const st=$("#rc-status"),on=$("#rc-on").checked;
+  const row={player_id:curPlayer,team_id:TEAM.id,enabled:on,updated_at:new Date().toISOString(),
+    show_stats:$("#rc-show_stats").checked,show_measurements:$("#rc-show_measurements").checked,highlight_media_id:$("#rc-highlight").value||null};
+  for(const k of RC_FIELDS){const v=$("#rc-"+k).value.trim();row[k]=k==="grad_year"?(v?+v:null):v;}
+  row.share_token=opts.newLink||(on&&!(rcRow&&rcRow.share_token))?newToken():(rcRow&&rcRow.share_token)||null;
+  if(row.highlight_url&&!ytId(row.highlight_url)){setStatus(st,"That doesn't look like a YouTube link.","err");return;}
+  try{await q(sb.from("recruit_profiles").upsert(row,{onConflict:"player_id"}));setStatus(st,on?"Saved. The link is live.":"Saved. The profile is off; the link doesn't work.","ok");logAct(`Updated recruiting profile`);renderRecruit(curPlayer);}
+  catch(e){setStatus(st,errText(e),"err");}
+}
+$("#rc-save").onclick=()=>saveRecruit();
+$("#rc-on").addEventListener("change",()=>saveRecruit());
+$("#rc-new").onclick=()=>saveRecruit({newLink:true});
+$("#rc-copy").onclick=async()=>{try{await navigator.clipboard.writeText(rcUrl(rcRow.share_token));setStatus($("#rc-status"),"Link copied.","ok");}catch(e){setStatus($("#rc-status"),rcUrl(rcRow.share_token));}};
+function recruitFacts(){
+  const all=playerLines(curPlayer,true),B=aggBat(all),P=aggPit(all),F=aggFld(all);
+  return {name:$("#rc-full_name").value,grad_year:$("#rc-grad_year").value,positions:$("#rc-positions").value,bats:$("#rc-bats").value,throws:$("#rc-throws").value,height:$("#rc-height").value,school:$("#rc-school").value,team:S.team.name,
+    batting:pickNums(B,["g","ab","h","d","t","hr","rbi","bb","so","sb","avg","obp","slg"]),pitching:pickNums(P,["g","outs","pc","so","bb","era","whip"]),fielding:pickNums(F,["g","po","a","e","pct"])};
+}
+async function rcAi(kind,btn){
+  const st=$("#rc-status");if(!aiEnabled){setStatus(st,AI_OFF,"err");return;}
+  btn.disabled=true;setStatus(st,"Drafting. This usually takes 15–40 seconds.");
+  try{
+    const [met,wu]=await Promise.all([sb.from("player_metrics").select("metric,unit,value,date").eq("player_id",curPlayer).order("date"),
+      sb.from("ai_reports").select("output").eq("player_id",curPlayer).eq("kind","player").eq("status","reviewed").order("created_at",{ascending:false}).limit(1)]);
+    const facts={...recruitFacts(),measurements:met.data||[],coach_reviewed_strengths:wu.data&&wu.data[0]?(wu.data[0].output.strengths||[]).map(s=>s.title+": "+s.detail):[]};
+    if(kind==="bio"){
+      const out=await ai(`Write a short recruiting bio (3 to 4 sentences, third person) for a high school baseball player, for college coaches. Use only the facts below; never invent stats, awards, or measurements, and don't exaggerate. Mention position, the most notable numbers, and one or two strengths. Plain, confident, professional.
+Return ONLY JSON: {"bio":""}
+FACTS: ${JSON.stringify(facts)}`);
+      if(!out.bio)throw new Error("The AI's answer was incomplete. Try again.");
+      $("#rc-bio").value=out.bio;setStatus(st,"Draft added to About. Edit it, then Save profile.","ok");
+    }else{
+      const link=rcRow&&rcRow.enabled&&rcRow.share_token?rcUrl(rcRow.share_token):"";
+      const out=await ai(`Write a short first-person introduction email from a high school baseball player to a college baseball coach. Keep it under 170 words, polite and specific, using only the facts below (never invent anything). Use the placeholders [Coach's name] and [College] where needed. Include the profile link if one is given, and upcoming showcases if any. Sign with the player's name, grad year, positions, and school.
+Return ONLY JSON: {"subject":"","body":""}
+FACTS: ${JSON.stringify({...facts,profile_link:link})}`);
+      if(!out.body)throw new Error("The AI's answer was incomplete. Try again.");
+      $("#rc-email").value=`Subject: ${out.subject||""}\n\n${out.body}`;$("#rc-email-out").hidden=false;setStatus(st,"Draft below. The player should edit it and send it from their own email.","ok");
+    }
+  }catch(e){setStatus(st,e.message||errText(e),"err");}
+  finally{btn.disabled=false;}
+}
+$("#rc-ai-bio").onclick=e=>rcAi("bio",e.currentTarget);
+$("#rc-ai-email").onclick=e=>rcAi("email",e.currentTarget);
+$("#rc-email-copy").onclick=async()=>{try{await navigator.clipboard.writeText($("#rc-email").value);setStatus($("#rc-status"),"Email copied.","ok");}catch(e){$("#rc-email").select();}};
+async function renderShowcases(pid){
+  const {data,error}=await sb.from("player_events").select("*").eq("player_id",pid).order("date");
+  if(error){$("#sc-list").innerHTML="";return;}
+  const t=today();
+  $("#sc-list").innerHTML=data.length?`<ul>${data.map(e=>`<li${e.date<t?' class="note"':""}><b>${esc(fmtDay(e.date))}${e.date.slice(0,4)!==t.slice(0,4)?" "+e.date.slice(0,4):""}</b>: ${esc(e.title)}${e.location?", "+esc(e.location):""} <button class="linkbtn" data-scdel="${e.id}">Remove</button></li>`).join("")}</ul>`:`<p class="note">None yet.</p>`;
+  if(!$("#sc-date").value)$("#sc-date").value=t;
+}
+$("#sc-add").onclick=async()=>{
+  const st=$("#sc-status"),title=$("#sc-title").value.trim(),date=$("#sc-date").value;if(!title||!date){setStatus(st,"Add a date and the event name.","err");return;}
+  try{await q(sb.from("player_events").insert({team_id:TEAM.id,player_id:curPlayer,date,title,location:$("#sc-loc").value.trim()}));$("#sc-title").value="";$("#sc-loc").value="";setStatus(st,"Added.","ok");renderShowcases(curPlayer);}
+  catch(e){setStatus(st,/player_events/.test(e.message||"")?"Showcases aren't set up yet. Run supabase/010_hs_tools.sql in Supabase.":errText(e),"err");}
+};
+document.addEventListener("click",async e=>{const b=e.target.closest("[data-scdel]");if(!b)return;try{await q(sb.from("player_events").delete().eq("id",b.dataset.scdel));renderShowcases(curPlayer);}catch(err){}});
+
+// ================= PITCH COUNT LOG =================
+function pitchLogRows(){
+  const from=$("#pcl-from").value||"0000",to=$("#pcl-to").value||"9999",inc=$("#pcl-out").checked,rows=[];
+  for(const p of S.players)for(const r of playerLines(p.id,inc)){
+    if(!r.pit||!(+r.pit.pc||+r.pit.outs)||r.date<from||r.date>to)continue;
+    const pc=+r.pit.pc||0,need=restDays(pc),d=new Date(r.date+"T12:00");d.setDate(d.getDate()+need+1);
+    rows.push({date:r.date,game:r.label+(r.kind==="outside"?" (outside)":""),num:p.num,name:p.name,pc,ip:outsToIp(+r.pit.outs||0),rest:need,avail:d.toISOString().slice(0,10)});
+  }
+  return rows.sort((a,b)=>a.date.localeCompare(b.date)||a.name.localeCompare(b.name));
+}
+function renderPitchLog(){
+  if(!$("#pcl-from").value){const ds=S.games.map(g=>g.date).sort();$("#pcl-from").value=ds[0]||today();$("#pcl-to").value=today()>(ds.at(-1)||"")?today():ds.at(-1);}
+  const rows=pitchLogRows();
+  $("#pcl-table").innerHTML=`<thead><tr><th class="l" style="cursor:default">Date</th><th class="l" style="cursor:default">Game</th><th style="cursor:default">#</th><th class="l" style="cursor:default">Pitcher</th><th style="cursor:default">Pitches</th><th style="cursor:default">IP</th><th style="cursor:default">Rest days</th><th style="cursor:default">Can pitch again</th></tr></thead><tbody>${rows.map(r=>`<tr><td class="l">${esc(fmtDay(r.date))}</td><td class="l">${esc(r.game)}</td><td>${r.num}</td><td class="l">${esc(r.name)}</td><td>${r.pc}</td><td>${r.ip}</td><td>${r.rest}</td><td>${esc(fmtDay(r.avail))}</td></tr>`).join("")||`<tr><td class="l note" colspan="8">No pitching outings in these dates.</td></tr>`}</tbody>`;
+}
+["#pcl-from","#pcl-to","#pcl-out"].forEach(id=>$(id).addEventListener("change",renderPitchLog));
+$("#pl-log-box").addEventListener("toggle",()=>{if($("#pl-log-box").open)renderPitchLog();});
+$("#pcl-csv").onclick=()=>{
+  const rows=pitchLogRows(),q_=v=>`"${String(v).replace(/"/g,'""')}"`;
+  const csv=["Date,Game,Jersey,Pitcher,Pitches,Innings,Rest days,Can pitch again",...rows.map(r=>[r.date,r.game,r.num,r.name,r.pc,r.ip,r.rest,r.avail].map(q_).join(","))].join("\r\n");
+  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download=`${TEAM.id}-pitch-counts-${$("#pcl-from").value}-to-${$("#pcl-to").value}.csv`;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},500);
+};
+$("#pcl-print").onclick=()=>{document.body.classList.add("print-pcl");window.print();setTimeout(()=>document.body.classList.remove("print-pcl"),500);};
+
+// ================= CALL-UPS =================
+let cuPool=[];
+async function loadCallups(){
+  const others=teams.filter(t=>t.id!==TEAM.id&&TEAM.school&&t.school===TEAM.school);
+  if(!canEdit||!others.length){$("#cu-row").hidden=true;return;}
+  const {data,error}=await sb.from("players").select("id,name,num,team_id").in("team_id",others.map(t=>t.id)).eq("active",true);
+  cuPool=error?[]:data;$("#cu-row").hidden=!cuPool.length;
+  $("#cu-pick").innerHTML=others.map(t=>{const ps=cuPool.filter(p=>p.team_id===t.id).sort((a,b)=>a.num-b.num);return ps.length?`<optgroup label="${esc(t.name)}">${ps.map(p=>`<option value="${p.id}">#${p.num} ${esc(p.name)}</option>`).join("")}</optgroup>`:"";}).join("");
+}
+$("#cu-add").onclick=async()=>{
+  const o=cuPool.find(p=>p.id===$("#cu-pick").value);if(!o)return;
+  let sh=S.players.find(p=>p.call_up_of===o.id);
+  try{
+    if(!sh){sh=(await q(sb.from("players").insert({team_id:TEAM.id,name:o.name,num:o.num,active:false,call_up_of:o.id}).select()))[0];S.players.push(sh);}
+    if(!curLineup.order.includes(sh.id))curLineup.order.push(sh.id);curLineup.on.add(sh.id);renderLineup();rebuildTables();
+    setStatus($("#lu-status"),`${o.name} added as a call-up. Stats from this game count for ${S.team.name}. Press Save lineup to keep it.`,"ok");
+  }catch(e){setStatus($("#lu-status"),/call_up_of/.test(e.message||"")?"Call-ups aren't set up yet. Run supabase/010_hs_tools.sql in Supabase.":errText(e),"err");}
+};
+
+// ================= CALENDAR SUBSCRIPTION =================
+function renderCalBox(){
+  const https=`${location.origin}/cal/${TEAM.id}.ics`;
+  $("#cal-url").textContent=https;$("#cal-sub").href=https.replace(/^https?:/,"webcal:");
+}
+$("#cal-copy").onclick=async()=>{try{await navigator.clipboard.writeText($("#cal-url").textContent);setStatus($("#cal-status"),"Copied.","ok");}catch(e){setStatus($("#cal-status"),"Select the link below and copy it.");}};
+
 // ---------- routing ----------
-const VIEWS=["schedule","live","stats","roster","photos","scorebook","sheet","admin","signin","account","teams","player"];
+const VIEWS=["schedule","live","stats","roster","photos","scorebook","sheet","admin","signin","account","teams","player","tryouts"];
 function route(){
   let v=location.hash.slice(1);
   if(v.startsWith("player-")){curPlayer=v.slice(7);v="player";}
@@ -1204,7 +1524,9 @@ function route(){
   if(!TEAM)return;
   if(v==="admin"){renderAdmin();renderSpondAdmin();loadRequests();}
   if(v==="photos")renderPhotos();
-  if(v==="stats"&&isCoach)loadTeamReview();
+  if(v==="stats"&&isCoach){loadTeamReview();if($("#pl-log-box").open)renderPitchLog();}
+  if(v==="tryouts")renderTryouts();
+  if(v==="schedule")renderCalBox();
   if(v==="live")startLive();
   if(v==="scorebook"){renderEntryGames(pendingEnter);if(pendingData){fillEntry(pendingData);setStatus($("#eg-status"),"Box score built from live scoring. Check it, then press Save game.","ok");}}
   pendingEnter=null;pendingData=null;
@@ -1232,6 +1554,7 @@ $("#gf-save").onclick=async()=>{
   const d=$("#gf-date").value,o=$("#gf-opp").value.trim();if(!d||!o){setStatus($("#gf-status"),ev?"Add a date and what the event is.":"Add a date and an opponent.","err");return;}
   const g=editingGame?{...findItem(editingGame)}:{id:uuid(),status:"scheduled",us:null,them:null,lineup:null};
   Object.assign(g,{date:d,time:$("#gf-time").value.trim(),opp:o,home:ev?true:$("#gf-home").value==="1",loc:$("#gf-loc").value.trim(),kind:ev?"event":"game"});
+  if(!ev&&g.status!=="final")g.status=$("#gf-st").value;
   const row=gameRow(g);if(!ev&&editingGame)row.kind="game";
   if(await run($("#gf-status"),`${editingGame?"Updated":"Added"} ${ev?`event ${o}`:`game ${g.home?"vs":"at"} ${o}`}`,()=>q(sb.from("games").upsert(row)))){
     putItem(g);render();$("#game-form").hidden=true;}
@@ -1577,7 +1900,8 @@ $("#lv-sheet-card").addEventListener("click",async e=>{
 // ---------- start ----------
 async function boot(){
   if(!sb){document.body.innerHTML=`<main class="wrap" style="padding-block:40px"><h2>Almost there</h2><p>${keyRole==="service_role"?"<code>config.js</code> has the secret service_role key, which would let anyone change the database. Replace it with the <b>anon public</b> key and redeploy.":"Add the Supabase project URL and <b>anon public</b> key to <code>public/config.js</code>, then redeploy."}</p></main>`;return;}
-  try{teams=await q(sb.from("teams").select("*").order("name"));}
+  try{teams=await q(sb.from("teams").select("*").order("name"));
+    const hs=(CFG.hostSchools||{})[location.hostname];if(hs)teams=teams.filter(t=>t.school===hs);}
   catch(e){document.body.innerHTML=`<main class="wrap" style="padding-block:40px"><h2>Can't reach the team database</h2><p>${esc(errText(e))}</p></main>`;return;}
   const params=new URLSearchParams(location.search),pick=params.has("pick");
   let tid=pick?null:teamIdFromUrl();
@@ -1601,13 +1925,13 @@ async function boot(){
   render();route();
   try{const r=await Promise.race([sb.auth.getSession(),new Promise((_,rej)=>setTimeout(()=>rej(new Error("slow")),5000))]);session=r.data.session;}
   catch(e){session=null;}
-  await refreshRole();if(canEdit)await loadTeamData();render();route();loadRequests();
+  await refreshRole();if(canEdit)await loadTeamData();render();route();loadRequests();updateTryoutNav().catch(()=>{});
   fetch("/api/ai").then(r=>r.ok?r.json():{enabled:false}).then(j=>{aiEnabled=!!j.enabled;aiMulti=!!j.multi_image;renderSchedule();$("#scan-run").disabled=!(aiEnabled&&$("#scan-file").files.length);
     if(!aiEnabled)$("#scan-status").textContent="Photo reading is turned off for this site. Enter numbers in the tables below.";}).catch(()=>{});
   // Supabase can deadlock if its own calls are awaited inside this callback, so defer the work.
   sb.auth.onAuthStateChange((ev,sess)=>{
     if(ev==="INITIAL_SESSION"||ev==="TOKEN_REFRESHED"){session=sess;return;}
-    setTimeout(async()=>{session=sess;await refreshRole();await loadTeamData();render();route();loadRequests();},0);
+    setTimeout(async()=>{session=sess;await refreshRole();await loadTeamData();render();route();loadRequests();updateTryoutNav().catch(()=>{});},0);
   });
 }
 boot();

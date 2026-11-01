@@ -7,5 +7,8 @@ window.RR_CONFIG = {
   supabaseAnonKey: "sb_publishable_MlCpoccZftsBpSnqku7jmw_NQOW-1n9",
   // Later, map your own web addresses to teams, e.g.
   // hostTeams: { "riders.example.com": "rough-riders", "team2.example.com": "team-two" },
-  hostTeams: {}
+  hostTeams: {},
+  // Show only one school's squads on an address, e.g.
+  // hostSchools: { "otayranchbaseball.com": "Otay Ranch HS" },
+  hostSchools: {}
 };
