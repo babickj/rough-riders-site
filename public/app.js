@@ -104,7 +104,7 @@ async function refreshRole(){
 }
 function renderAcct(){
   const a=$("#acct");
-  if(session)a.innerHTML=`<div>${esc(me.name||me.email)}</div>${role?`<span class="role">${role==="admin"?"Admin":role==="scorekeeper"?"Scorekeeper":"Parent"}</span>`:""}<div><a href="#account">My account</a></div>`;
+  if(session)a.innerHTML=`<div>${esc(me.name||me.email)}</div>${role?`<span class="role">${role==="admin"?"Admin":role==="scorekeeper"?"Scorekeeper":"Parent"}</span>`:""}<div><a href="#account">My account</a> · <a href="#" data-signout>Sign out</a></div>`;
   else a.innerHTML="";
   const st=$("#si-state");
   if(session&&!role)st.textContent=`You're signed in as ${me.email}, but this account isn't on the ${S.team.name} team yet. Ask the team admin to add you.`;
@@ -127,7 +127,14 @@ $("#ac-form").addEventListener("submit",async e=>{
   if(error){setStatus(st,error.message,"err");return;}
   $("#ac-pw1").value="";$("#ac-pw2").value="";setStatus(st,"Password changed.","ok");
 });
-$("#ac-signout").onclick=async()=>{await sb.auth.signOut();location.hash="#schedule";};
+async function signOut(){
+  // Sign out on this device even if the server call stalls, then reload into a clean state.
+  try{await Promise.race([sb.auth.signOut({scope:"local"}),new Promise(r=>setTimeout(r,3000))]);}catch(e){}
+  try{Object.keys(localStorage).filter(k=>k.startsWith("sb-")).forEach(k=>localStorage.removeItem(k));}catch(e){}
+  location.hash="#schedule";location.reload();
+}
+$("#ac-signout").onclick=signOut;
+document.addEventListener("click",e=>{if(e.target.closest("[data-signout]")){e.preventDefault();signOut();}});
 
 // ---------- stats ----------
 function batTotals(gid){
@@ -836,9 +843,10 @@ async function boot(){
   await refreshRole();render();route();
   fetch("/api/ai").then(r=>r.ok?r.json():{enabled:false}).then(j=>{aiEnabled=!!j.enabled;renderSchedule();$("#scan-run").disabled=!(aiEnabled&&$("#scan-file").files.length);
     if(!aiEnabled)$("#scan-status").textContent="Photo reading is turned off for this site. Enter numbers in the tables below.";}).catch(()=>{});
-  sb.auth.onAuthStateChange(async(ev,sess)=>{
-    if(ev==="INITIAL_SESSION"||ev==="TOKEN_REFRESHED")return;
-    session=sess;await refreshRole();render();route();
+  // Supabase can deadlock if its own calls are awaited inside this callback, so defer the work.
+  sb.auth.onAuthStateChange((ev,sess)=>{
+    if(ev==="INITIAL_SESSION"||ev==="TOKEN_REFRESHED"){session=sess;return;}
+    setTimeout(async()=>{session=sess;await refreshRole();render();route();},0);
   });
 }
 boot();
