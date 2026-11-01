@@ -1,8 +1,9 @@
 // Cloudflare Worker entry: /api/* goes to the server code, everything else is the static site in public/.
 import * as admin from "./src/admin.js";
 import * as ai from "./src/ai.js";
+import * as spond from "./src/spond.js";
 
-const routes = { "/api/admin": admin, "/api/ai": ai };
+const routes = { "/api/admin": admin, "/api/ai": ai, "/api/spond": spond };
 
 export default {
   async fetch(request, env, ctx) {
@@ -16,5 +17,9 @@ export default {
     }
     if (url.pathname.startsWith("/api/")) return new Response("Not found", { status: 404 });
     return env.ASSETS.fetch(request);
+  },
+  // Pulls the schedule from Spond on the timer set in wrangler.jsonc.
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(spond.scheduled(env));
   },
 };

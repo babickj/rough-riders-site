@@ -10,6 +10,7 @@ Static site and a small Worker on Cloudflare, data and logins in Supabase.
 - `worker.js` and `wrangler.jsonc`: the Cloudflare Worker that serves the site and the `/api` routes
 - `src/admin.js`: adding people, roles, password resets
 - `src/ai.js`: optional scoresheet photo and Spond reading with Claude
+- `src/spond.js`: Spond schedule sync (every 2 hours, plus a Sync button)
 - `supabase/schema.sql`: database tables and access rules
 - `supabase/seed.sql`: creates the team and makes you the owner
 - `public/logos/rough-riders.jpg`: team logo (a second team's logo goes in `public/logos/<team-web-name>.jpg`, or upload it in Admin)
@@ -41,6 +42,13 @@ Paste the Project URL and anon key into `public/config.js` and commit it. Both a
    - `SUPABASE_SERVICE_ROLE_KEY` = service_role key (type Secret)
    - `ANTHROPIC_API_KEY` = optional, turns on scoresheet photo and Spond reading (type Secret)
 4. Every push to `main` redeploys. The site is live at `https://rough-riders-site.<your-subdomain>.workers.dev`.
+
+### 4. Spond schedule sync (optional)
+1. In Supabase **SQL Editor**, run `supabase/002_spond.sql` once.
+2. In the Worker's **Settings > Variables and Secrets**, add `SPOND_EMAIL` and `SPOND_PASSWORD` (type **Secret**) for a Spond login that belongs to the team's group.
+3. On the site, **Admin > Spond schedule sync > Show my Spond groups**, pick the group, press **Use this group**.
+
+Spond has no official public API; this uses the same calls as the open-source Spond library, so it may need updating if Spond changes them. Only games sync (practices and similar events are skipped). Name games like "vs Cardinals" or "@ Padres".
 
 ### Later: your own web address
 In the Worker, **Settings > Domains & Routes > Add > Custom domain**. For one address per team, add each one and map it in `config.js`:

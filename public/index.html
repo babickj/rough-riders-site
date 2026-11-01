@@ -38,7 +38,8 @@
 <main class="wrap">
   <section id="v-schedule" class="stack" hidden>
     <div class="sec-head"><h2>Schedule</h2>
-      <span class="row edit-only"><button type="button" id="add-game">Add game</button><button type="button" id="open-import">Import from Spond</button></span></div>
+      <span class="row edit-only"><button type="button" id="add-game">Add game</button><button type="button" id="sp-sync" hidden>Sync with Spond</button><button type="button" id="open-import">Paste from Spond</button></span></div>
+    <p class="note" id="sp-line" hidden></p>
     <div id="import-panel" class="panel edit-only" hidden>
       <h3>Import from Spond</h3>
       <p class="note">In Spond, open the team's event list, select the text of the upcoming games, and paste it here. Claude reads the dates, times, opponents, and fields and shows them for you to check before adding.</p>
@@ -246,6 +247,13 @@
         <button type="button" id="nt-add">Add team</button>
       </div>
       <span class="status" id="nt-status"></span>
+    </div>
+    <div class="panel">
+      <h3>Spond schedule sync</h3>
+      <p class="note" id="sp-admin-state"></p>
+      <div class="row"><button type="button" id="sp-load">Show my Spond groups</button><label class="f" id="sp-pick-wrap" hidden>Spond group<select id="sp-pick"></select></label><button type="button" class="primary" id="sp-save" hidden>Use this group</button><button type="button" id="sp-off" hidden>Stop syncing</button></div>
+      <span class="status" id="sp-astatus"></span>
+      <p class="note">Games come over from Spond every two hours, or when you press Sync with Spond on the Schedule tab. Practices and other non-game events are skipped. Name games in Spond like "vs Cardinals" or "@ Padres" so the opponent and home or away come through. Edits to a game's date, time, opponent, or field should be made in Spond, since the next sync copies Spond's version.</p>
     </div>
     <div class="panel">
       <h3>Team logo</h3>

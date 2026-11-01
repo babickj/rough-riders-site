@@ -174,7 +174,14 @@ function renderSchedule(){
   $("#upcoming").innerHTML=up.map(gameRowHtml).join("")||`<p class="note" style="padding:12px 0">Nothing scheduled yet.${canEdit?" Add a game or import from Spond.":""}</p>`;
   $("#results").innerHTML=done.map(gameRowHtml).join("")||`<p class="note" style="padding:12px 0">No games played yet.</p>`;
   $("#open-import").hidden=!aiEnabled;
+  const sp=!!TEAM.spond_group;
+  $("#sp-sync").hidden=!sp;
+  const line=$("#sp-line");line.hidden=!sp;
+  if(sp)line.textContent=`Games sync from Spond${TEAM.spond_group_name?" ("+TEAM.spond_group_name+")":""}. ${TEAM.spond_synced_at?"Last synced "+ago(TEAM.spond_synced_at)+".":"Not synced yet."}`;
 }
+function ago(ts){const m=Math.round((Date.now()-new Date(ts))/6e4);if(m<1)return "just now";if(m<60)return m+" min ago";const h=Math.round(m/60);if(h<24)return h+" hr ago";return new Date(ts).toLocaleDateString(undefined,{month:"short",day:"numeric"});}
+async function reloadTeam(){const t=await q(sb.from("teams").select("*").eq("id",TEAM.id));if(t[0])Object.assign(TEAM,t[0]);await loadTeamData();render();}
+function syncSummary(r){const parts=[];if(r.added)parts.push(`${r.added} new`);if(r.updated)parts.push(`${r.updated} updated`);if(r.removed)parts.push(`${r.removed} cancelled game${r.removed>1?"s":""} removed`);return parts.length?`Synced: ${parts.join(", ")}.`:"Synced. No games found in Spond yet.";}
 let editingGame=null;
 function openGameForm(g){
   editingGame=g?g.id:null;$("#game-form").hidden=false;$("#game-form-title").textContent=g?"Edit game":"Add game";
@@ -425,6 +432,36 @@ $("#lg-up").onclick=async()=>{
   catch(e){setStatus(st,errText(e),"err");}
 };
 
+// ---------- spond ----------
+$("#sp-sync").onclick=async()=>{
+  const b=$("#sp-sync"),line=$("#sp-line");b.disabled=true;b.textContent="Syncing…";
+  try{const r=await api("/api/spond",{action:"sync",team_id:TEAM.id});await reloadTeam();line.textContent=syncSummary(r.result)+" "+line.textContent;logAct("Synced schedule from Spond");}
+  catch(e){line.hidden=false;line.textContent=e.message;}
+  finally{b.disabled=false;b.textContent="Sync with Spond";}
+};
+function renderSpondAdmin(){
+  $("#sp-admin-state").textContent=TEAM.spond_group?`Connected to Spond group "${TEAM.spond_group_name||TEAM.spond_group}". ${TEAM.spond_synced_at?"Last synced "+ago(TEAM.spond_synced_at)+".":""}`:"Not connected. Press Show my Spond groups, pick this team's group, and press Use this group.";
+  $("#sp-off").hidden=!TEAM.spond_group;
+}
+$("#sp-load").onclick=async()=>{
+  const st=$("#sp-astatus");setStatus(st,"Signing in to Spond…");
+  try{const r=await api("/api/spond",{action:"groups",team_id:TEAM.id});
+    if(!r.groups.length){setStatus(st,"That Spond account isn't in any groups. Use a Spond login that belongs to the team.","err");return;}
+    $("#sp-pick").innerHTML=r.groups.map(g=>`<option value="${esc(g.id)}" ${g.id===TEAM.spond_group?"selected":""}>${esc(g.name)}</option>`).join("");
+    $("#sp-pick-wrap").hidden=false;$("#sp-save").hidden=false;setStatus(st,"");}
+  catch(e){setStatus(st,e.message,"err");}
+};
+$("#sp-save").onclick=async()=>{
+  const st=$("#sp-astatus"),sel=$("#sp-pick"),name=sel.options[sel.selectedIndex].text;setStatus(st,"Connecting and syncing…");
+  try{const r=await api("/api/spond",{action:"set_group",team_id:TEAM.id,group_id:sel.value,group_name:name});await reloadTeam();renderSpondAdmin();setStatus(st,syncSummary(r.result),"ok");logAct(`Connected Spond group ${name}`);}
+  catch(e){setStatus(st,e.message,"err");}
+};
+$("#sp-off").onclick=async()=>{
+  const st=$("#sp-astatus");
+  try{await api("/api/spond",{action:"set_group",team_id:TEAM.id,group_id:null});await reloadTeam();renderSpondAdmin();setStatus(st,"Spond sync is off. Games already synced stay on the schedule.","ok");logAct("Turned off Spond sync");}
+  catch(e){setStatus(st,e.message,"err");}
+};
+
 // ---------- routing ----------
 const VIEWS=["schedule","live","stats","roster","photos","scorebook","sheet","admin","signin","account","teams"];
 function route(){
@@ -439,7 +476,7 @@ function route(){
   for(const x of VIEWS)$("#v-"+x).hidden=x!==v;
   $$("nav.tabs a").forEach(a=>a.getAttribute("data-v")===v?a.setAttribute("aria-current","page"):a.removeAttribute("aria-current"));
   if(!TEAM)return;
-  if(v==="admin")renderAdmin();
+  if(v==="admin"){renderAdmin();renderSpondAdmin();}
   if(v==="photos")renderPhotos();
   if(v==="live")startLive();
   if(v==="scorebook"){renderEntryGames(pendingEnter);if(pendingData){fillEntry(pendingData);setStatus($("#eg-status"),"Box score built from live scoring. Check it, then press Save game.","ok");}}

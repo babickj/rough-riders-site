@@ -180,3 +180,10 @@ create policy "admins upload logos" on storage.objects for insert
 drop policy if exists "admins replace logos" on storage.objects;
 create policy "admins replace logos" on storage.objects for update
   using (bucket_id = 'logos' and public.has_role((storage.foldername(name))[1], array['admin']));
+
+-- ---------- Spond sync (same as 002_spond.sql) ----------
+alter table public.teams add column if not exists spond_group text;
+alter table public.teams add column if not exists spond_group_name text;
+alter table public.teams add column if not exists spond_synced_at timestamptz;
+alter table public.games add column if not exists spond_id text;
+create unique index if not exists games_spond_id_key on public.games (spond_id);
