@@ -114,7 +114,7 @@ textarea{width:100%;min-height:110px}
 .sheet h4{font-family:var(--f-head);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 6px}
 .mark{display:inline-block;width:14px;height:14px;border:2px solid #111;background:#111;vertical-align:middle;margin-right:6px}
 .lineup{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;border-top:1px solid var(--line)}
-.lineup li{display:grid;grid-template-columns:34px 28px 44px 1fr auto;gap:8px;align-items:center;padding:5px 2px;border-bottom:1px solid var(--line)}
+.lineup li{display:grid;grid-template-columns:28px 34px 28px 44px 1fr auto;gap:8px;align-items:center;padding:5px 2px;border-bottom:1px solid var(--line)}
 .lineup li.out{opacity:.5}
 .lineup .ord{font-family:var(--f-head);font-weight:800;font-size:18px;text-align:center;font-variant-numeric:tabular-nums}
 .lineup .arr{display:flex;gap:4px}
@@ -415,3 +415,14 @@ body.viewing-own .coach-only.own-ok{display:block!important}
   .ci-row{grid-template-columns:44px 1fr auto}
   .ci-row .linkbtn{grid-column:3}
 }
+
+/* ---- lineup drag and Spond RSVPs ---- */
+.lineup .drag{cursor:grab;touch-action:none;user-select:none;font-size:22px;line-height:1;color:var(--muted);text-align:center;padding:8px 0}
+.lineup li.dragging{background:var(--surface);box-shadow:0 6px 18px rgba(0,0,0,.25);position:relative;z-index:2;opacity:1}
+.lineup li.dragging .drag{cursor:grabbing;color:var(--red)}
+.lineup li.moved{background:color-mix(in srgb,var(--good) 14%,transparent);transition:background .6s}
+.rsvp{display:inline-block;font-family:var(--f-head);font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:1px 6px;border-radius:2px;margin-left:4px;vertical-align:1px}
+.rsvp.yes{background:color-mix(in srgb,var(--good) 18%,transparent);color:var(--good)}
+.rsvp.no{background:color-mix(in srgb,var(--bad) 16%,transparent);color:var(--bad)}
+.rsvp.maybe{border:1px solid var(--muted);color:var(--muted)}
+body.no-select,body.no-select *{user-select:none;-webkit-user-select:none}

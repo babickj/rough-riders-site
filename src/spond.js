@@ -92,6 +92,46 @@ export async function syncTeam(env, team, token) {
   return { added, updated, removed, skipped: events.length - games.length };
 }
 
+// Who said they're coming to one Spond game, matched to the site's roster by name.
+// Spond keeps answers as member ids; the group's member list gives their names.
+const squash = (x) => String(x || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z ]/g, "").replace(/\s+/g, " ").trim();
+export function matchMembers(members, players) {
+  const firstCount = {};
+  for (const m of members) { const f = squash(m.firstName); firstCount[f] = (firstCount[f] || 0) + 1; }
+  const out = {};
+  for (const m of members) {
+    const f = squash(m.firstName), l = squash(m.lastName), full = `${f} ${l}`.trim();
+    const hit = players.find((p) => squash(p.name) === full)
+      || players.find((p) => l && squash(p.name) === `${f} ${l[0]}`)
+      || (firstCount[f] === 1 ? players.find((p) => squash(p.name) === f) : null)
+      || (firstCount[f] === 1 ? players.filter((p) => squash(p.name).split(" ")[0] === f).length === 1 && players.find((p) => squash(p.name).split(" ")[0] === f) : null);
+    if (hit) out[m.id] = hit.id;
+  }
+  return out;
+}
+async function rsvp(env, team, game, q) {
+  const token = await spondLogin(env);
+  const day = new Date(game.date + "T12:00:00Z");
+  const from = new Date(day - 2 * 864e5).toISOString(), to = new Date(+day + 2 * 864e5).toISOString();
+  const [events, groups, players] = await Promise.all([
+    spondGet(token, `sponds/?max=100&scheduled=true&includeHidden=true&groupId=${encodeURIComponent(team.spond_group)}&minStartTimestamp=${from}&maxEndTimestamp=${to}`),
+    spondGet(token, "groups/"),
+    q(`players?team_id=eq.${encodeURIComponent(team.id)}&active=eq.true&select=id,name`),
+  ]);
+  let ev = (events || []).find((e) => String(e.id) === String(game.spond_id));
+  if (!ev) ev = ((await spondGet(token, `sponds/?max=500&scheduled=true&includeHidden=true&groupId=${encodeURIComponent(team.spond_group)}&minStartTimestamp=${from}`)) || []).find((e) => String(e.id) === String(game.spond_id));
+  if (!ev) return { error: "Couldn't find this game in Spond anymore." };
+  const group = (groups || []).find((g) => g.id === team.spond_group) || {};
+  const members = [...(group.members || []), ...(((ev.recipients || {}).group || {}).members || [])];
+  const byId = Object.fromEntries(members.map((m) => [m.id, m]));
+  const map = matchMembers(Object.values(byId), players);
+  const r = ev.responses || {};
+  const pick = (ids) => (ids || []).map((id) => map[id]).filter(Boolean);
+  const unmatched = [...(r.acceptedIds || []), ...(r.declinedIds || []), ...(r.unansweredIds || [])]
+    .filter((id) => !map[id] && byId[id]).map((id) => `${byId[id].firstName || ""} ${byId[id].lastName || ""}`.trim());
+  return { going: pick(r.acceptedIds), not_going: pick(r.declinedIds), no_answer: pick([...(r.unansweredIds || []), ...(r.unconfirmedIds || [])]), waiting: pick(r.waitinglistIds), unmatched };
+}
+
 // Runs on the Worker's schedule (see wrangler.jsonc "triggers").
 export async function scheduled(env) {
   if (!env.SPOND_EMAIL || !env.SUPABASE_SERVICE_ROLE_KEY) return;
@@ -130,6 +170,12 @@ export async function onRequestPost({ request, env }) {
       if (!body.group_id) return json({ ok: true });
       const team = (await q(`teams?id=eq.${encodeURIComponent(team_id)}&select=id,spond_group`))[0];
       return json({ ok: true, result: await syncTeam(env, team) });
+    }
+    if (body.action === "rsvp") {
+      const game = (await q(`games?id=eq.${encodeURIComponent(String(body.game_id || ""))}&team_id=eq.${encodeURIComponent(team_id)}&select=id,date,spond_id`))[0];
+      const team = (await q(`teams?id=eq.${encodeURIComponent(team_id)}&select=id,spond_group`))[0];
+      if (!game || !game.spond_id || game.spond_id.startsWith("ics:") || !team || !team.spond_group) return json({ error: "This game didn't come from Spond." }, 400);
+      return json(await rsvp(env, team, game, q));
     }
     if (body.action === "sync") {
       const team = (await q(`teams?id=eq.${encodeURIComponent(team_id)}&select=id,spond_group`))[0];

@@ -166,9 +166,10 @@
       <label class="f">Their runs<input type="number" id="eg-them" min="0" style="width:80px"></label>
     </div>
     <div class="panel">
-      <div class="sec-head" style="margin:0"><h3>Lineup for this game</h3><span class="row"><button type="button" id="lu-all">Everyone</button><button type="button" class="coach-only" id="gd-run">Suggest with AI</button><button type="button" id="lu-save">Save lineup</button></span></div>
+      <div class="sec-head" style="margin:0"><h3>Lineup for this game</h3><span class="row"><button type="button" id="lu-spond" hidden>Fill from Spond</button><button type="button" id="lu-all">Everyone</button><button type="button" class="coach-only" id="gd-run">Suggest with AI</button><button type="button" id="lu-save">Save lineup</button></span></div>
       <div id="gd-out" class="coach-only"></div>
-      <p class="note">Check who is playing and set the batting order with the arrows. The stat tables and the printed scoresheet follow this lineup. Save it before the game to print a sheet with the right order.</p>
+      <div id="lu-rsvp"></div>
+      <p class="note">Check who is playing, and drag the ⠿ handle (or use the arrows) to set the batting order. The stat tables and the printed scoresheet follow this lineup. Save it before the game to print a sheet with the right order.</p>
       <ol class="lineup" id="lineup"></ol>
       <div class="row" id="cu-row" hidden><label class="f">Call up a player from another squad<select id="cu-pick"></select></label><button type="button" id="cu-add">Add to this game</button></div>
       <span class="status" id="lu-status"></span>

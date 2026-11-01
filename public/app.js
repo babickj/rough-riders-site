@@ -228,7 +228,7 @@ function gameRowHtml(g){
   else if(g.status==="postponed")res=`<span class="pill t">Postponed</span>`;
   else if(g.date<today())res=`<span class="pill up">No score yet</span>`;
   else res=`<span class="pill up${g.date===today()?" today":""}">${relDay(g.date)}</span>`;
-  const actions=[isCoach&&S.lines[g.id]?`<button class="linkbtn" data-box="${g.id}">Box score</button>`:"",canEdit?`<button class="linkbtn" data-edit="${g.id}">Edit</button>`:"",canEdit?`<button class="linkbtn" data-enter="${g.id}">Enter stats</button>`:""].filter(Boolean).join(" · ");
+  const actions=[isCoach&&S.lines[g.id]?`<button class="linkbtn" data-box="${g.id}">Box score</button>`:"",canEdit?`<button class="linkbtn" data-edit="${g.id}">Edit</button>`:"",canEdit?`<button class="linkbtn" data-enter="${g.id}">${g.status!=="final"&&g.date>=today()?"Lineup":"Enter stats"}</button>`:""].filter(Boolean).join(" · ");
   return `<div class="game"><div class="gdate"><div class="m">${dow(g.date)} ${p.m}</div><div class="d">${p.d}</div></div>
   <div class="gmain"><div class="gopp">${g.home?"vs":"at"} ${esc(g.opp)}</div><div class="gmeta">${esc(g.loc)}${g.status==="final"?"":" · "+esc(g.time)}</div></div>
   <div class="gres">${res}<small>${actions}</small></div></div>`;
@@ -382,10 +382,31 @@ const curGame=()=>S.games.find(x=>x.id===$("#eg-game").value);
 function lineupFor(g){const ids=S.players.map(p=>p.id);if(g&&Array.isArray(g.lineup))return g.lineup.filter(id=>ids.includes(id));return sortedPlayers().map(p=>p.id);}
 function loadLineup(){const on=lineupFor(curGame()),rest=sortedPlayers().map(p=>p.id).filter(id=>!on.includes(id));curLineup={order:[...on,...rest],on:new Set(on)};}
 function activeLineup(){return curLineup?curLineup.order.filter(id=>curLineup.on.has(id)).map(id=>S.players.find(p=>p.id===id)).filter(Boolean):[];}
+// ---------- Spond RSVPs fill the lineup for upcoming games ----------
+const rsvps={};
+const fromSpond=g=>!!(g&&g.spond_id&&!String(g.spond_id).startsWith("ics:")&&TEAM.spond_group);
+async function loadRsvp(force){
+  const g=curGame(),box=$("#lu-rsvp");if(!box)return;
+  $("#lu-spond").hidden=!(canEdit&&fromSpond(g));
+  if(!canEdit||!fromSpond(g)||g.status==="final"){box.innerHTML="";return;}
+  box.innerHTML=`<p class="note">Checking who's coming in Spond…</p>`;
+  let r;try{r=await api("/api/spond",{action:"rsvp",team_id:TEAM.id,game_id:g.id});}catch(e){box.innerHTML=`<p class="note">${esc(e.message)}</p>`;return;}
+  if(curGame()!==g)return;
+  if(r.error){box.innerHTML=`<p class="note">${esc(r.error)}</p>`;return;}
+  rsvps[g.id]={going:new Set(r.going),no:new Set(r.not_going),maybe:new Set([...(r.no_answer||[]),...(r.waiting||[])])};
+  // Fill automatically only if nobody has saved a lineup for this game yet, or when asked.
+  if(force||!Array.isArray(g.lineup)){const going=rsvps[g.id].going;
+    curLineup.order=[...curLineup.order.filter(id=>going.has(id)),...curLineup.order.filter(id=>!going.has(id))];curLineup.on=new Set(curLineup.order.filter(id=>going.has(id)));
+    renderLineup();rebuildTables();}
+  else renderLineup();
+  const nm=ids=>ids.map(id=>(S.players.find(p=>p.id===id)||{}).name).filter(Boolean).map(esc).join(", ");
+  box.innerHTML=`<p class="note"><b>Spond:</b> ${r.going.length} going, ${r.not_going.length} can't make it, ${(r.no_answer||[]).length} haven't answered.${force||!Array.isArray(g.lineup)?" The lineup below is filled in from Spond; drag to set the order, then Save lineup.":" A lineup is already saved for this game, so it wasn't changed. Press Fill from Spond to start over from the RSVPs."}${r.not_going.length?` <br>Out: ${nm(r.not_going)}.`:""}${(r.unmatched||[]).length?` <br><span class="flag">Not matched to the roster: ${(r.unmatched||[]).map(esc).join(", ")}.</span> Make the roster name match Spond (first name and last initial works).`:""}</p>`;
+}
 function renderLineup(){
-  let n=0;
+  let n=0;const rv=rsvps[(curGame()||{}).id];
+  const badge=id=>!rv?"":rv.going.has(id)?`<span class="rsvp yes" title="Going in Spond">Going</span>`:rv.no.has(id)?`<span class="rsvp no" title="Can't make it in Spond">Out</span>`:rv.maybe.has(id)?`<span class="rsvp maybe" title="No answer in Spond">?</span>`:"";
   $("#lineup").innerHTML=curLineup.order.map(id=>{const p=S.players.find(p=>p.id===id);if(!p)return "";const on=curLineup.on.has(id);
-    return `<li class="${on?"":"out"}"><span class="ord">${on?++n:"–"}</span><input type="checkbox" id="lu-${id}" data-lu-on="${id}" ${on?"checked":""} aria-label="${esc(p.name)} is playing"><span class="jersey" style="font-size:20px;min-width:0">${p.num}</span><label for="lu-${id}">${esc(p.name)}${p.call_up_of?' <span class="note">(call-up)</span>':""}</label><span class="arr"><button type="button" data-lu-up="${id}" aria-label="Move ${esc(p.name)} up">↑</button><button type="button" data-lu-dn="${id}" aria-label="Move ${esc(p.name)} down">↓</button></span></li>`}).join("")||`<li class="note">Add players on the Roster tab first.</li>`;
+    return `<li class="${on?"":"out"}" data-li="${id}"><span class="drag" data-drag="${id}" aria-hidden="true" title="Drag to reorder">⠿</span><span class="ord">${on?++n:"–"}</span><input type="checkbox" id="lu-${id}" data-lu-on="${id}" ${on?"checked":""} aria-label="${esc(p.name)} is playing"><span class="jersey" style="font-size:20px;min-width:0">${p.num}</span><label for="lu-${id}">${esc(p.name)}${p.call_up_of?' <span class="note">(call-up)</span>':""} ${badge(id)}</label><span class="arr"><button type="button" data-lu-up="${id}" aria-label="Move ${esc(p.name)} up">↑</button><button type="button" data-lu-dn="${id}" aria-label="Move ${esc(p.name)} down">↓</button></span></li>`}).join("")||`<li class="note">Add players on the Roster tab first.</li>`;
 }
 function rebuildTables(){
   const snap={};$$("#eb-table input,#ep-table input,#ef-table input").forEach(i=>snap[i.id]=i.value);
@@ -395,7 +416,7 @@ function rebuildTables(){
 function fillEntry(data){
   const g=curGame();
   $("#eg-us").value=data&&data.us!=null?data.us:(g&&g.us!=null?g.us:"");$("#eg-them").value=data&&data.them!=null?data.them:(g&&g.them!=null?g.them:"");
-  if(!data){loadLineup();renderLineup();loadCallups();}
+  if(!data){loadLineup();renderLineup();loadCallups();loadRsvp(false);}
   buildTables(data||S.lines[g&&g.id]||{bat:{},pit:{}},data);
 }
 function buildTables(L,data){
@@ -1935,6 +1956,23 @@ $("#sheet-print").onclick=()=>window.print();
 $("#lineup").addEventListener("change",e=>{const id=e.target.dataset.luOn;if(!id)return;if(e.target.checked)curLineup.on.add(id);else curLineup.on.delete(id);
   const o=curLineup.order.filter(x=>x!==id),lastOn=o.reduce((m,x,i)=>curLineup.on.has(x)?i:m,-1);o.splice(e.target.checked?lastOn+1:o.length,0,id);curLineup.order=o;renderLineup();rebuildTables();$("#lu-"+id).focus();});
 $("#lineup").addEventListener("click",e=>{const b=e.target.closest("[data-lu-up],[data-lu-dn]");if(!b)return;const id=b.dataset.luUp||b.dataset.luDn,o=curLineup.order,i=o.indexOf(id),j=b.dataset.luUp?i-1:i+1;if(j<0||j>=o.length)return;[o[i],o[j]]=[o[j],o[i]];renderLineup();rebuildTables();const nb=$(`[data-lu-${b.dataset.luUp?"up":"dn"}="${id}"]`);if(nb)nb.focus();});
+$("#lu-spond").onclick=()=>loadRsvp(true);
+// Drag to reorder (works with a finger or a mouse): grab the handle and move the row.
+(function(){
+  const list=$("#lineup");let drag=null;
+  list.addEventListener("pointerdown",e=>{const h=e.target.closest("[data-drag]");if(!h)return;e.preventDefault();
+    const li=h.closest("li");drag={li,id:h.dataset.drag,pid:e.pointerId};li.classList.add("dragging");document.body.classList.add("no-select");h.setPointerCapture(e.pointerId);});
+  list.addEventListener("pointermove",e=>{if(!drag||e.pointerId!==drag.pid)return;
+    if(e.clientY<70)scrollBy(0,-12);else if(e.clientY>innerHeight-70)scrollBy(0,12);
+    const items=[...list.querySelectorAll("li[data-li]")].filter(x=>x!==drag.li);
+    const after=items.find(x=>{const r=x.getBoundingClientRect();return e.clientY<r.top+r.height/2;});
+    if(after){if(after!==drag.li.nextSibling)list.insertBefore(drag.li,after);}else if(list.lastElementChild!==drag.li)list.appendChild(drag.li);});
+  const end=e=>{if(!drag||e.pointerId!==drag.pid)return;drag.li.classList.remove("dragging");document.body.classList.remove("no-select");
+    const order=[...list.querySelectorAll("li[data-li]")].map(x=>x.dataset.li),id=drag.id;drag=null;
+    if(order.join()!==curLineup.order.join()){curLineup.order=order;renderLineup();rebuildTables();}
+    const r=$(`[data-li="${id}"]`);if(r){r.classList.add("moved");setTimeout(()=>r.classList.remove("moved"),600);}};
+  list.addEventListener("pointerup",end);list.addEventListener("pointercancel",end);
+})();
 $("#lu-all").onclick=()=>{curLineup.on=new Set(curLineup.order);renderLineup();rebuildTables();};
 $("#lu-save").onclick=async()=>{const g=curGame();if(!g)return;const lu=activeLineup().map(p=>p.id);
   if(await run($("#lu-status"),`Set lineup ${g.home?"vs":"at"} ${g.opp} (${lu.length} players)`,()=>q(sb.from("games").update({lineup:lu}).eq("id",g.id)))){g.lineup=lu;renderSheet();}};
