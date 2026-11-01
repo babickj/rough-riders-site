@@ -9,7 +9,7 @@ const enc = encodeURIComponent;
 
 function db(env) {
   const base = env.SUPABASE_URL.replace(/\/$/, ""), svc = env.SUPABASE_SERVICE_ROLE_KEY;
-  const h = { apikey: svc, Authorization: `Bearer ${svc}`, "content-type": "application/json" };
+  const h = { apikey: svc, ...(svc.startsWith("eyJ") ? { Authorization: `Bearer ${svc}` } : {}), "content-type": "application/json" };
   return async (path, init = {}) => {
     const r = await fetch(`${base}/rest/v1/${path}`, { ...init, headers: { ...h, ...(init.headers || {}) } });
     if (!r.ok) throw new Error(`Database error ${r.status}: ${(await r.text()).slice(0, 200)}`);

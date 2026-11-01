@@ -12,7 +12,7 @@ export async function onRequestPost({ request, env }) {
 
   const base = env.SUPABASE_URL.replace(/\/$/, "");
   const svc = env.SUPABASE_SERVICE_ROLE_KEY;
-  const sh = { apikey: svc, Authorization: `Bearer ${svc}`, "content-type": "application/json" };
+  const sh = { apikey: svc, ...(svc.startsWith("eyJ") ? { Authorization: `Bearer ${svc}` } : {}), "content-type": "application/json" };
   const rest = (path, init = {}) => fetch(`${base}/rest/v1/${path}`, { ...init, headers: { ...sh, Prefer: "return=representation", ...(init.headers || {}) } });
   const authAdmin = (path, init = {}) => fetch(`${base}/auth/v1/admin/${path}`, { ...init, headers: { ...sh, ...(init.headers || {}) } });
 
