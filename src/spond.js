@@ -28,6 +28,8 @@ async function spondGet(token, path) {
   return r.json();
 }
 
+const genericTitle = (t) => /^(additional|extra|make[- ]?up|bonus|added|new|league|practice|scrimmage|tournament|tourney|pool play|playoff)?\s*(game|games)\s*#?\d*$/i.test(String(t || "").trim()) || String(t || "").trim().toUpperCase() === "TBD";
+
 // Turn one Spond event into a game, or null for practices, meetings and cancelled events.
 export function parseEvent(ev, tz, teamName = "") {
   const title = String(ev.heading || "").trim();
@@ -51,6 +53,8 @@ export function parseEvent(ev, tz, teamName = "") {
     home = m && /^(@|at)$/i.test(m[1]) ? ourIdx === 1 : ourIdx === 0;
   } else if (m) { opp = m[2]; home = !/^(@|at)$/i.test(m[1]); }
   opp = opp.replace(/\s*[-–—|:]\s*(game|home|away)\b.*$/i, "").replace(/^(game|home game|away game)\s*[-–—:]?\s*/i, "").trim() || title;
+  // Titles that only say it's a game ("Additional Game", "Makeup game 2") don't name an opponent.
+  if (genericTitle(opp)) opp = "TBD";
   if (/\baway\b/i.test(title) && !m) home = false;
   const loc = (ev.location && (ev.location.feature || ev.location.address)) || "";
   return { spond_id: String(ev.id), date, time, opp: opp.slice(0, 80), home, loc: String(loc).slice(0, 120), cancelled: !!ev.cancelled };
@@ -73,7 +77,7 @@ export async function syncTeam(env, team, token) {
   const from = new Date(Date.now() - 14 * 864e5).toISOString().slice(0, 10) + "T00:00:00.000Z";
   const events = await spondGet(token, `sponds/?max=500&scheduled=true&includeHidden=false&groupId=${encodeURIComponent(team.spond_group)}&minStartTimestamp=${from}`) || [];
   const games = events.map((e) => parseEvent(e, tz, team.name)).filter(Boolean);
-  const existing = await q(`games?team_id=eq.${encodeURIComponent(team.id)}&spond_id=not.is.null&select=id,spond_id,status`);
+  const existing = (await q(`games?team_id=eq.${encodeURIComponent(team.id)}&spond_id=not.is.null&select=id,spond_id,status,date,opp`)).filter((g) => !String(g.spond_id).startsWith("ics:"));
   const byId = Object.fromEntries(existing.map((g) => [g.spond_id, g]));
   let added = 0, updated = 0, removed = 0;
   const upserts = [];
@@ -83,8 +87,18 @@ export async function syncTeam(env, team, token) {
       if (had && had.status !== "final") { await q(`games?id=eq.${had.id}`, { method: "DELETE" }); removed++; }
       continue;
     }
-    upserts.push({ team_id: team.id, spond_id: g.spond_id, date: g.date, time: g.time, opp: g.opp, home: g.home, loc: g.loc });
+    // Spond only says "Additional Game"? Keep an opponent a coach typed in on the site.
+    const opp = g.opp === "TBD" && had && had.opp && !genericTitle(had.opp) ? had.opp : g.opp;
+    upserts.push({ team_id: team.id, spond_id: g.spond_id, date: g.date, time: g.time, opp, home: g.home, loc: g.loc });
     had ? updated++ : added++;
+  }
+  // Games deleted in Spond come off the site too (only ones in the window just read, not final, and with no stats entered).
+  const inSpond = new Set(events.map((e) => String(e.id))), fromDay = from.slice(0, 10);
+  const gone = existing.filter((g) => !inSpond.has(g.spond_id) && g.status !== "final" && g.date >= fromDay);
+  if (gone.length) {
+    const withStats = new Set((await q(`game_lines?game_id=in.(${gone.map((g) => g.id).join(",")})&select=game_id`)).map((l) => l.game_id));
+    const del = gone.filter((g) => !withStats.has(g.id));
+    if (del.length) { await q(`games?id=in.(${del.map((g) => g.id).join(",")})`, { method: "DELETE" }); removed += del.length; }
   }
   // Anyone who said "going" to an upcoming game but isn't on the roster gets added.
   try {
