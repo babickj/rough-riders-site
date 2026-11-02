@@ -92,7 +92,7 @@ export async function syncTeam(env, team, token) {
     const accepted = events.filter((e) => !e.cancelled && Date.parse(e.startTimestamp) >= now - 864e5 && games.some((g) => g.spond_id === String(e.id)))
       .flatMap((e) => (e.responses && e.responses.acceptedIds) || []);
     if (accepted.length) {
-      const [groups, players] = await Promise.all([spondGet(token, "groups/"), q(`players?team_id=eq.${encodeURIComponent(team.id)}&select=id,name,active`)]);
+      const [groups, players] = await Promise.all([spondGet(token, "groups/"), q(`players?team_id=eq.${encodeURIComponent(team.id)}&select=id,name,num,active`)]);
       const recips = { recipients: { group: { members: events.flatMap((e) => ((e.recipients || {}).group || {}).members || []) } } };
       await addAccepted(q, team.id, membersOf(groups, team.spond_group, recips), accepted, players);
     }
@@ -106,16 +106,36 @@ export async function syncTeam(env, team, token) {
 // Who said they're coming to one Spond game, matched to the site's roster by name.
 // Spond keeps answers as member ids; the group's member list gives their names.
 const squash = (x) => String(x || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z ]/g, "").replace(/\s+/g, " ").trim();
+// Spond names often carry a jersey number and a nickname, sometimes all in one field:
+// 'Peter Leree #7', 'Dylan “DJ” Lampert #11'. Pull those apart.
+export function parseMember(m) {
+  let t = `${m.firstName || ""} ${m.lastName || ""}`;
+  const num = (t.match(/#\s*(\d{1,3})\b/) || [])[1];
+  t = t.replace(/#\s*\d{1,3}\b/g, " ").replace(/\bno\.?\s*\d{1,3}\b/gi, " ");
+  const nick = (t.match(/[“"(]([^”")]+)[”")]/) || [])[1];
+  t = t.replace(/[“"(][^”")]*[”")]/g, " ").replace(/\s+/g, " ").trim();
+  const words = t.split(" ").filter(Boolean), sq = words.map(squash).filter(Boolean);
+  const first = sq[0] || "", last = sq.slice(1).join(" ");
+  const shown = words.length ? `${words[0]}${words.length > 1 ? " " + words[words.length - 1][0].toUpperCase() + "." : ""}` : "";
+  return { first, last, nick: squash(nick || ""), num: num ? +num : null, shown: shown.slice(0, 40) };
+}
 export function matchMembers(members, players) {
+  const P = members.map((m) => ({ id: m.id, ...parseMember(m) }));
   const firstCount = {};
-  for (const m of members) { const f = squash(m.firstName); firstCount[f] = (firstCount[f] || 0) + 1; }
+  for (const m of P) firstCount[m.first] = (firstCount[m.first] || 0) + 1;
+  const pn = (p) => squash(String(p.name || "").replace(/#\s*\d{1,3}\b/g, " ").replace(/[“"(][^”")]*[”")]/g, " ")), pf = (p) => pn(p).split(" ")[0], pl = (p) => (pn(p).split(" ")[1] || "")[0] || "";
   const out = {};
-  for (const m of members) {
-    const f = squash(m.firstName), l = squash(m.lastName), full = `${f} ${l}`.trim();
-    const hit = players.find((p) => squash(p.name) === full)
-      || players.find((p) => l && squash(p.name) === `${f} ${l[0]}`)
-      || (firstCount[f] === 1 ? players.find((p) => squash(p.name) === f) : null)
-      || (firstCount[f] === 1 ? players.filter((p) => squash(p.name).split(" ")[0] === f).length === 1 && players.find((p) => squash(p.name).split(" ")[0] === f) : null);
+  for (const m of P) {
+    if (!m.first) continue;
+    const full = `${m.first} ${m.last}`.trim(), li = m.last[0] || "";
+    const one = (arr) => (arr.length === 1 ? arr[0] : null);
+    const hit = players.find((p) => pn(p) === full)
+      || (li && players.find((p) => pn(p) === `${m.first} ${li}`))
+      || (m.nick && players.find((p) => [m.nick, `${m.nick} ${li}`.trim(), `${m.nick} ${m.last}`.trim()].includes(pn(p))))
+      // Same jersey number, and the first name, nickname, or last initial agrees.
+      || (m.num ? one(players.filter((p) => +p.num === m.num && (pf(p) === m.first || (m.nick && pf(p) === m.nick) || (li && pl(p) === li)))) : null)
+      || (firstCount[m.first] === 1 ? players.find((p) => pn(p) === m.first) : null)
+      || (firstCount[m.first] === 1 ? one(players.filter((p) => pf(p) === m.first)) : null);
     if (hit) out[m.id] = hit.id;
   }
   return out;
@@ -125,10 +145,17 @@ export function matchMembers(members, players) {
 export async function addAccepted(q, teamId, members, acceptedIds, players) {
   const map = matchMembers(members, players);
   const byId = Object.fromEntries(members.map((m) => [m.id, m]));
-  const fresh = [...new Set(acceptedIds)].filter((id) => !map[id] && byId[id] && byId[id].firstName);
+  // Fill in jersey numbers Spond knows about, and tidy names an earlier sync copied with the number or nickname in them.
+  for (const [mid, pid] of Object.entries(map)) {
+    const p = players.find((x) => x.id === pid), info = parseMember(byId[mid] || {}), fix = {};
+    if (!p) continue;
+    if (info.num != null && !(+p.num)) fix.num = info.num;
+    if (/[#“”"]/.test(p.name || "") && info.shown) fix.name = info.shown;
+    if (Object.keys(fix).length) { await q(`players?id=eq.${encodeURIComponent(pid)}`, { method: "PATCH", body: JSON.stringify(fix) }).catch(() => {}); Object.assign(p, fix); }
+  }
+  const fresh = [...new Set(acceptedIds)].filter((id) => !map[id] && byId[id] && parseMember(byId[id]).first);
   if (!fresh.length) return { map, added: [] };
-  const rows = fresh.map((id) => { const m = byId[id], l = String(m.lastName || "").trim();
-    return { team_id: teamId, name: `${String(m.firstName).trim()}${l ? " " + l[0].toUpperCase() + "." : ""}`.slice(0, 40), num: 0, active: true }; });
+  const rows = fresh.map((id) => { const i = parseMember(byId[id]); return { team_id: teamId, name: i.shown, num: i.num ?? 0, active: true }; });
   const added = await q("players", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify(rows) }) || [];
   added.forEach((p, i) => { map[fresh[i]] = p.id; });
   await q("activity", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ team_id: teamId, by_name: "Spond sync", what: `Added ${added.map((p) => p.name).join(", ")} to the roster (said going in Spond)` }) }).catch(() => {});
@@ -147,7 +174,7 @@ async function rsvp(env, team, game, q) {
   const [events, groups, players] = await Promise.all([
     spondGet(token, `sponds/?max=100&scheduled=true&includeHidden=true&groupId=${encodeURIComponent(team.spond_group)}&minStartTimestamp=${from}&maxEndTimestamp=${to}`),
     spondGet(token, "groups/"),
-    q(`players?team_id=eq.${encodeURIComponent(team.id)}&select=id,name,active`),
+    q(`players?team_id=eq.${encodeURIComponent(team.id)}&select=id,name,num,active`),
   ]);
   let ev = (events || []).find((e) => String(e.id) === String(game.spond_id));
   if (!ev) ev = ((await spondGet(token, `sponds/?max=500&scheduled=true&includeHidden=true&groupId=${encodeURIComponent(team.spond_group)}&minStartTimestamp=${from}`)) || []).find((e) => String(e.id) === String(game.spond_id));
@@ -159,8 +186,8 @@ async function rsvp(env, team, game, q) {
   const inactive = new Set(players.filter((p) => p.active === false).map((p) => p.id));
   const pick = (ids) => (ids || []).map((id) => map[id]).filter((id) => id && !inactive.has(id));
   const unmatched = [...(r.acceptedIds || []), ...(r.declinedIds || []), ...(r.unansweredIds || [])]
-    .filter((id) => !map[id] && byId[id] && !(r.acceptedIds || []).includes(id)).map((id) => `${byId[id].firstName || ""} ${byId[id].lastName || ""}`.trim());
-  return { added: added.map((p) => ({ id: p.id, name: p.name, num: p.num, active: true, team_id: p.team_id })), going: pick(r.acceptedIds), not_going: pick(r.declinedIds), no_answer: pick([...(r.unansweredIds || []), ...(r.unconfirmedIds || [])]), waiting: pick(r.waitinglistIds), unmatched };
+    .filter((id) => !map[id] && byId[id] && !(r.acceptedIds || []).includes(id)).map((id) => `${byId[id].firstName || ""} ${byId[id].lastName || ""}`.replace(/\s+/g, " ").trim());
+  return { renamed: players.filter((p) => p.active !== false).map((p) => ({ id: p.id, name: p.name, num: p.num })), added: added.map((p) => ({ id: p.id, name: p.name, num: p.num, active: true, team_id: p.team_id })), going: pick(r.acceptedIds), not_going: pick(r.declinedIds), no_answer: pick([...(r.unansweredIds || []), ...(r.unconfirmedIds || [])]), waiting: pick(r.waitinglistIds), unmatched };
 }
 
 // Runs on the Worker's schedule (see wrangler.jsonc "triggers").
