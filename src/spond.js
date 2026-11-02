@@ -167,7 +167,7 @@ const membersOf = (groups, groupId, ev) => {
   return Object.values(Object.fromEntries(all.map((m) => [m.id, m])));
 };
 
-async function rsvp(env, team, game, q) {
+async function rsvp(env, team, game, q, addIds = []) {
   const token = await spondLogin(env);
   const day = new Date(game.date + "T12:00:00Z");
   const from = new Date(day - 2 * 864e5).toISOString(), to = new Date(+day + 2 * 864e5).toISOString();
@@ -182,11 +182,11 @@ async function rsvp(env, team, game, q) {
   const members = membersOf(groups, team.spond_group, ev);
   const byId = Object.fromEntries(members.map((m) => [m.id, m]));
   const r = ev.responses || {};
-  const { map, added } = await addAccepted(q, team.id, members, r.acceptedIds || [], players);
+  const { map, added } = await addAccepted(q, team.id, members, [...(r.acceptedIds || []), ...addIds.map(String)], players);
   const inactive = new Set(players.filter((p) => p.active === false).map((p) => p.id));
   const pick = (ids) => (ids || []).map((id) => map[id]).filter((id) => id && !inactive.has(id));
   const unmatched = [...(r.acceptedIds || []), ...(r.declinedIds || []), ...(r.unansweredIds || [])]
-    .filter((id) => !map[id] && byId[id] && !(r.acceptedIds || []).includes(id)).map((id) => `${byId[id].firstName || ""} ${byId[id].lastName || ""}`.replace(/\s+/g, " ").trim());
+    .filter((id) => !map[id] && byId[id] && !(r.acceptedIds || []).includes(id)).map((id) => ({ id, name: `${byId[id].firstName || ""} ${byId[id].lastName || ""}`.replace(/\s+/g, " ").trim(), answer: (r.declinedIds || []).includes(id) ? "can't make it" : "hasn't answered" }));
   return { renamed: players.filter((p) => p.active !== false).map((p) => ({ id: p.id, name: p.name, num: p.num })), added: added.map((p) => ({ id: p.id, name: p.name, num: p.num, active: true, team_id: p.team_id })), going: pick(r.acceptedIds), not_going: pick(r.declinedIds), no_answer: pick([...(r.unansweredIds || []), ...(r.unconfirmedIds || [])]), waiting: pick(r.waitinglistIds), unmatched };
 }
 
@@ -233,7 +233,7 @@ export async function onRequestPost({ request, env }) {
       const game = (await q(`games?id=eq.${encodeURIComponent(String(body.game_id || ""))}&team_id=eq.${encodeURIComponent(team_id)}&select=id,date,spond_id`))[0];
       const team = (await q(`teams?id=eq.${encodeURIComponent(team_id)}&select=id,spond_group`))[0];
       if (!game || !game.spond_id || game.spond_id.startsWith("ics:") || !team || !team.spond_group) return json({ error: "This game didn't come from Spond." }, 400);
-      return json(await rsvp(env, team, game, q));
+      return json(await rsvp(env, team, game, q, Array.isArray(body.add_members) ? body.add_members.slice(0, 60) : []));
     }
     if (body.action === "sync") {
       const team = (await q(`teams?id=eq.${encodeURIComponent(team_id)}&select=id,spond_group`))[0];

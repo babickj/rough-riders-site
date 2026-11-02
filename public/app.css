@@ -426,3 +426,5 @@ body.viewing-own .coach-only.own-ok{display:block!important}
 .rsvp.no{background:color-mix(in srgb,var(--bad) 16%,transparent);color:var(--bad)}
 .rsvp.maybe{border:1px solid var(--muted);color:var(--muted)}
 body.no-select,body.no-select *{user-select:none;-webkit-user-select:none}
+.sp-unm{flex-direction:column;align-items:stretch}
+.sp-unm-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)}

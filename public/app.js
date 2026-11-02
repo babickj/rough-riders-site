@@ -386,12 +386,12 @@ function activeLineup(){return curLineup?curLineup.order.filter(id=>curLineup.on
 const rsvps={};
 const dot=t=>String(t).replace(/\.$/,"")+".";
 const fromSpond=g=>!!(g&&g.spond_id&&!String(g.spond_id).startsWith("ics:")&&TEAM.spond_group);
-async function loadRsvp(force){
+async function loadRsvp(force,addMembers){
   const g=curGame(),box=$("#lu-rsvp");if(!box)return;
   $("#lu-spond").hidden=!(canEdit&&fromSpond(g));
   if(!canEdit||!fromSpond(g)||g.status==="final"){box.innerHTML="";return;}
   box.innerHTML=`<p class="note">Checking who's coming in Spond…</p>`;
-  let r;try{r=await api("/api/spond",{action:"rsvp",team_id:TEAM.id,game_id:g.id});}catch(e){box.innerHTML=`<p class="note">${esc(e.message)}</p>`;return;}
+  let r;try{r=await api("/api/spond",{action:"rsvp",team_id:TEAM.id,game_id:g.id,...(addMembers?{add_members:addMembers}:{})});}catch(e){box.innerHTML=`<p class="note">${esc(e.message)}</p>`;return;}
   if(curGame()!==g)return;
   if(r.error){box.innerHTML=`<p class="note">${esc(r.error)}</p>`;return;}
   // Kids Spond just added to the roster.
@@ -411,7 +411,11 @@ async function loadRsvp(force){
   renderLineup();rebuildTables();
   const nm=ids=>ids.map(id=>(S.players.find(p=>p.id===id)||{}).name).filter(Boolean).map(esc).join(", ");
   const ins=changes.filter(c=>c[0]==="+").map(c=>c.slice(1)),outs=changes.filter(c=>c[0]==="-").map(c=>c.slice(1));
-  box.innerHTML=`<p class="note"><b>Spond:</b> ${r.going.length} going, ${r.not_going.length} can't make it, ${(r.no_answer||[]).length} haven't answered.${(r.added||[]).length?` <br><b>New on the roster from Spond:</b> ${dot((r.added||[]).map(p=>esc(p.name)+(+p.num?` #${p.num}`:"")).join(", "))}${(r.added||[]).some(p=>!+p.num)?" Spond didn't have a jersey number for "+dot((r.added||[]).filter(p=>!+p.num).map(p=>esc(p.name)).join(", "))+" Add it on the Roster tab.":""}`:""}${force||!Array.isArray(g.lineup)?" <br>The lineup below is filled in from Spond; drag to set the order, then Save lineup.":ins.length||outs.length?` <br><b>Changed since you saved:</b> ${ins.length?`added ${nm(ins)} (said going)`:""}${ins.length&&outs.length?"; ":""}${outs.length?`took out ${nm(outs)} (can't make it)`:""}. Press Save lineup to keep it.`:" <br>Your saved lineup matches Spond."}${r.not_going.length?` <br>Out: ${dot(nm(r.not_going))}`:""}${(r.unmatched||[]).length?` <br><span class="flag">Not matched to the roster: ${(r.unmatched||[]).map(esc).join(", ")}.</span> These kids are in Spond but not on this roster. If one of them is, give that player the same jersey number as in Spond (or the same first name and last initial) and they'll match next time.`:""}</p>`;
+  box.innerHTML=`<p class="note"><b>Spond:</b> ${r.going.length} going, ${r.not_going.length} can't make it, ${(r.no_answer||[]).length} haven't answered.${(r.added||[]).length?` <br><b>New on the roster from Spond:</b> ${dot((r.added||[]).map(p=>esc(p.name)+(+p.num?` #${p.num}`:"")).join(", "))}${(r.added||[]).some(p=>!+p.num)?" Spond didn't have a jersey number for "+dot((r.added||[]).filter(p=>!+p.num).map(p=>esc(p.name)).join(", "))+" Add it on the Roster tab.":""}`:""}${force||!Array.isArray(g.lineup)?" <br>The lineup below is filled in from Spond; drag to set the order, then Save lineup.":ins.length||outs.length?` <br><b>Changed since you saved:</b> ${ins.length?`added ${nm(ins)} (said going)`:""}${ins.length&&outs.length?"; ":""}${outs.length?`took out ${nm(outs)} (can't make it)`:""}. Press Save lineup to keep it.`:" <br>Your saved lineup matches Spond."}${r.not_going.length?` <br>Out: ${dot(nm(r.not_going))}`:""}</p>${(r.unmatched||[]).length?`<div class="banner sp-unm"><div><b>In Spond, not on this roster yet:</b> kids are added on their own when they say going. To add them now, tap Add.
+    ${(r.unmatched||[]).map(u=>`<div class="sp-unm-row"><span>${esc(u.name)} <span class="note">(${esc(u.answer)})</span></span><button type="button" data-spadd="${esc(u.id)}">Add to roster</button></div>`).join("")}
+    ${(r.unmatched||[]).length>1?`<button type="button" class="primary" data-spadd="all">Add all ${(r.unmatched||[]).length}</button>`:""}
+    <div class="note">Already on the roster under another name? Give them the same jersey number as in Spond and they'll match.</div></div></div>`:""}`;
+  box.querySelectorAll("[data-spadd]").forEach(b=>b.onclick=()=>{b.disabled=true;b.textContent="Adding…";loadRsvp(false,b.dataset.spadd==="all"?(r.unmatched||[]).map(u=>u.id):[b.dataset.spadd]);});
 }
 function renderLineup(){
   let n=0;const rv=rsvps[(curGame()||{}).id];
