@@ -2314,4 +2314,15 @@ async function boot(){
   });
 }
 boot();
+
+// ---------- new version check ----------
+// The page can stay open for days. When a new version of the site goes live, offer a reload
+// so an old page doesn't talk to new server code.
+(function(){
+  let first=null;const tag=async()=>{try{const r=await fetch("/app.js",{method:"HEAD",cache:"no-store"});return r.headers.get("etag");}catch(e){return null;}};
+  const check=async()=>{const t=await tag();if(!t)return;if(!first){first=t;return;}if(t!==first&&!$("#upd-bar")){
+    const b=document.createElement("div");b.id="upd-bar";b.className="upd-bar";b.setAttribute("role","status");
+    b.innerHTML=`<span>The site was just updated.</span><button type="button" class="primary">Reload</button>`;b.querySelector("button").onclick=()=>location.reload();document.body.appendChild(b);}};
+  check();setInterval(check,5*60*1000);document.addEventListener("visibilitychange",()=>{if(!document.hidden)check();});
+})();
 })();
