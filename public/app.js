@@ -7,7 +7,9 @@ const CFG=window.RR_CONFIG||{};
 // Refuse to run with a secret key in the public config: it would bypass every access rule.
 const keyRole=(()=>{try{return JSON.parse(atob(String(CFG.supabaseAnonKey).split(".")[1].replace(/-/g,"+").replace(/_/g,"/"))).role;}catch(e){return /^sb_secret_/.test(CFG.supabaseAnonKey||"")?"service_role":null;}})();
 const configured=CFG.supabaseUrl&&!/PASTE_/.test(CFG.supabaseUrl)&&!/PASTE_/.test(CFG.supabaseAnonKey||"")&&keyRole!=="service_role";
-const sb=configured?window.supabase.createClient(CFG.supabaseUrl,CFG.supabaseAnonKey):null;
+// PKCE: Google sign-in comes back as ?code=... so it never collides with the #view in the address.
+const AUTH_RET=(()=>{const u=new URLSearchParams(location.search);return {code:u.get("code"),error:u.get("error_description")||u.get("error")};})();
+const sb=configured?window.supabase.createClient(CFG.supabaseUrl,CFG.supabaseAnonKey,{auth:{flowType:"pkce",detectSessionInUrl:true,persistSession:true}}):null;
 
 let S=null, TEAM=null, teams=[], session=null, role=null, myPlayer=null, siteAdmin=false, canEdit=false, isAdmin=false, isCoach=false, aiEnabled=false, aiMulti=false;
 const me={id:null,email:"",name:""};
@@ -155,6 +157,13 @@ function renderAcct(){
   $("#si-title").textContent=`Sign in to ${S.team.name}`;
   $("#ac-who").textContent=session?`Signed in as ${me.name?me.name+" ("+me.email+")":me.email}${role?", "+role:""} on ${S.team.name}.`:"";
 }
+// Google sign-in shows only once it's turned on in Supabase.
+fetch(`${CFG.supabaseUrl}/auth/v1/settings`,{headers:{apikey:CFG.supabaseAnonKey}}).then(r=>r.ok?r.json():{}).then(j=>{const on=!!(j.external&&j.external.google);$("#si-google").hidden=!on;$("#si-or").hidden=!on;}).catch(()=>{});
+$("#si-google").onclick=async()=>{
+  const st=$("#si-status");setStatus(st,"Opening Google…");
+  const {error}=await sb.auth.signInWithOAuth({provider:"google",options:{redirectTo:location.origin+location.pathname,queryParams:{prompt:"select_account"}}});
+  if(error)setStatus(st,error.message,"err");
+};
 $("#si-form").addEventListener("submit",async e=>{
   e.preventDefault(); const st=$("#si-status"); setStatus(st,"Signing in…"); $("#si-go").disabled=true;
   const {error}=await sb.auth.signInWithPassword({email:$("#si-email").value.trim(),password:$("#si-pw").value});
@@ -801,7 +810,7 @@ function guessPlayer(name){const n=String(name||"").trim().toLowerCase();if(!n)r
   return (ps.find(p=>p.name.toLowerCase()===n)||ps.find(p=>p.name.toLowerCase().split(/\s+/)[0]===n.split(/\s+/)[0])||{}).id||null;}
 function showPw(name,pw){
   const box=$("#ad-pwbox");box.hidden=false;
-  box.innerHTML=`<span>Temporary password for ${esc(name)}: <span class="temp-pw">${esc(pw)}</span> Send it to them privately. They can change it under My account.</span><button type="button" id="pw-copy">Copy</button>`;
+  box.innerHTML=`<span>Temporary password for ${esc(name)}: <span class="temp-pw">${esc(pw)}</span> Send it to them privately. They can change it under My account. If their email is a Gmail or Google account, they can skip the password and use Continue with Google.</span><button type="button" id="pw-copy">Copy</button>`;
   $("#pw-copy").onclick=async()=>{try{await navigator.clipboard.writeText(pw);$("#pw-copy").textContent="Copied";}catch(e){}};
 }
 async function renderAdmin(){
@@ -2289,7 +2298,7 @@ async function boot(){
   // With several teams, the bare address shows the team list instead of guessing.
   TEAM=teams.find(t=>t.id===tid)||null;
   // Put the team's own address in the bar (e.g. /eastlake) without reloading.
-  if(TEAM&&!(CFG.hostTeams||{})[location.hostname]&&location.pathname!=="/"+TEAM.id){try{history.replaceState(null,"","/"+encodeURIComponent(TEAM.id)+(location.hash||"#schedule"));}catch(e){}}
+  if(TEAM&&!(CFG.hostTeams||{})[location.hostname]&&location.pathname!=="/"+TEAM.id){try{history.replaceState(null,"","/"+encodeURIComponent(TEAM.id)+location.search+(location.hash||"#schedule"));}catch(e){}}
   if(!TEAM){
     if(pick)try{history.replaceState(null,"","/");}catch(e){}
     const card=t=>`<a href="${teamLink(t.id)}"><img src="${logoUrl(t)}" alt="" onerror="this.remove()"><b>${esc(t.name)}</b></a>`;
@@ -2304,6 +2313,9 @@ async function boot(){
   render();route();
   try{const r=await Promise.race([sb.auth.getSession(),new Promise((_,rej)=>setTimeout(()=>rej(new Error("slow")),5000))]);session=r.data.session;}
   catch(e){session=null;}
+  // Back from Google: tidy the address, and explain if Google worked but this person isn't on a team.
+  if(AUTH_RET.code||AUTH_RET.error){try{history.replaceState(null,"",location.pathname+(location.hash||"#schedule"));}catch(e){}}
+  if(AUTH_RET.error&&!session){location.hash="#signin";setTimeout(()=>{$("#si-status").className="status err";$("#si-status").textContent=/signup|not allowed|not found/i.test(AUTH_RET.error)?"That Google account isn't set up on this site yet. Ask for a login below using the same Gmail address, or sign in with the email your coach added.":"Google sign-in didn't finish: "+AUTH_RET.error;},50);}
   await refreshRole();if(canEdit||myPlayer)await loadTeamData();render();route();loadRequests();updateTryoutNav().catch(()=>{});
   fetch("/api/ai").then(r=>r.ok?r.json():{enabled:false}).then(j=>{aiEnabled=!!j.enabled;aiMulti=!!j.multi_image;renderSchedule();$("#scan-run").disabled=!(aiEnabled&&$("#scan-file").files.length);
     if(!aiEnabled)$("#scan-status").textContent="Photo reading is turned off for this site. Enter numbers in the tables below.";}).catch(()=>{});

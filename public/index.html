@@ -212,12 +212,14 @@
       <h2 id="si-title">Sign in</h2>
       <p id="si-state" class="si-state"></p>
       <form class="authbox" id="si-form">
+        <button type="button" class="big google-btn" id="si-google" hidden>Continue with Google</button>
+        <div class="si-or" id="si-or" hidden><span>or use email and password</span></div>
         <label class="f">Email<input type="email" id="si-email" autocomplete="username" required></label>
         <label class="f">Password<input type="password" id="si-pw" autocomplete="current-password" required></label>
         <button class="primary big" type="submit" id="si-go">Sign in</button>
         <span class="status" id="si-status"></span>
       </form>
-      <p class="note" id="si-help">Forgot your password? Ask your team admin to reset it. The schedule, scores, team stats, and team photos are open to everyone without signing in.</p>
+      <p class="note" id="si-help">Google works for any login whose email is a Gmail or Google account. Forgot your password? Ask your team admin to reset it. The schedule, scores, team stats, and team photos are open to everyone without signing in.</p>
       <form class="authbox panel" id="rq-form" style="max-width:440px">
         <h3>Don't have a login? Request one</h3>
         <p class="note">Logins are for team staff. Scorekeepers enter games and keep live score. Coaches also see player stats, video, and coaching tools. The team admin reviews each request and sends you a password.</p>

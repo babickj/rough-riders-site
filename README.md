@@ -136,3 +136,11 @@ Run `supabase/014_tryout_days.sql` once (after 010). On the Tryouts tab, open a 
 - **Stations**: each coach picks a station (Hitting, Infield/outfield, Pitching, Catching, Running, Makeup) and taps 1 to 5 per number. Running and Catching have a stopwatch; the best time counts. Scores are saved on the phone first and upload when there's signal.
 - **Board**: hidden until an admin presses Reveal, then ranked by overall score across all coaches and days, with a flag when one coach scores well above or below the others.
 - **Setup**: hide/show scores and edit the scoring guide (what a 1, 3, and 5 look like).
+
+### 15. Sign in with Google (optional)
+1. Google Cloud Console (console.cloud.google.com): create a project, set up the Google Auth Platform (app name, support email, audience External), then **Clients > Create client > Web application**.
+   - Authorized JavaScript origins: the site's address, e.g. `https://rough-riders-site.<subdomain>.workers.dev` (add the custom domains later).
+   - Authorized redirect URI: `https://<project-ref>.supabase.co/auth/v1/callback` (shown on Supabase's Google provider page).
+2. Supabase: **Authentication > Sign In / Providers > Google**, turn it on, paste the Client ID and Client Secret, save.
+3. Supabase: **Authentication > URL Configuration**: Site URL = the site's address; add `https://<site>/**` under Redirect URLs.
+The "Continue with Google" button appears on the sign-in page by itself once Google is turned on. Logins still need an admin to add the person (or approve their request); with "Allow new users to sign up" off, an unknown Google account is refused with a friendly message.
