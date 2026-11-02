@@ -384,6 +384,7 @@ function loadLineup(){const on=lineupFor(curGame()),rest=sortedPlayers().map(p=>
 function activeLineup(){return curLineup?curLineup.order.filter(id=>curLineup.on.has(id)).map(id=>S.players.find(p=>p.id===id)).filter(Boolean):[];}
 // ---------- Spond RSVPs fill the lineup for upcoming games ----------
 const rsvps={};
+const dot=t=>String(t).replace(/\.$/,"")+".";
 const fromSpond=g=>!!(g&&g.spond_id&&!String(g.spond_id).startsWith("ics:")&&TEAM.spond_group);
 async function loadRsvp(force){
   const g=curGame(),box=$("#lu-rsvp");if(!box)return;
@@ -393,14 +394,23 @@ async function loadRsvp(force){
   let r;try{r=await api("/api/spond",{action:"rsvp",team_id:TEAM.id,game_id:g.id});}catch(e){box.innerHTML=`<p class="note">${esc(e.message)}</p>`;return;}
   if(curGame()!==g)return;
   if(r.error){box.innerHTML=`<p class="note">${esc(r.error)}</p>`;return;}
+  // Kids Spond just added to the roster.
+  for(const p of r.added||[])if(!S.players.some(x=>x.id===p.id)){S.players.push({...p,pos_primary:[],pos_backup:[]});curLineup.order.push(p.id);}
   rsvps[g.id]={going:new Set(r.going),no:new Set(r.not_going),maybe:new Set([...(r.no_answer||[]),...(r.waiting||[])])};
-  // Fill automatically only if nobody has saved a lineup for this game yet, or when asked.
-  if(force||!Array.isArray(g.lineup)){const going=rsvps[g.id].going;
+  const going=rsvps[g.id].going,changes=[];
+  if(force||!Array.isArray(g.lineup)){
+    // No saved lineup yet (or asked to start over): everyone going, in roster order.
     curLineup.order=[...curLineup.order.filter(id=>going.has(id)),...curLineup.order.filter(id=>!going.has(id))];curLineup.on=new Set(curLineup.order.filter(id=>going.has(id)));
-    renderLineup();rebuildTables();}
-  else renderLineup();
+  }else{
+    // Saved lineup: keep the coach's order, add kids who said going since, take out kids who now can't make it.
+    for(const id of curLineup.order){if(going.has(id)&&!curLineup.on.has(id)){curLineup.on.add(id);changes.push("+"+id);}else if(rsvps[g.id].no.has(id)&&curLineup.on.has(id)){curLineup.on.delete(id);changes.push("-"+id);}}
+    const on=curLineup.order.filter(id=>curLineup.on.has(id)&&!changes.includes("+"+id)),added=changes.filter(c=>c[0]==="+").map(c=>c.slice(1));
+    curLineup.order=[...on,...added,...curLineup.order.filter(id=>!curLineup.on.has(id))];
+  }
+  renderLineup();rebuildTables();
   const nm=ids=>ids.map(id=>(S.players.find(p=>p.id===id)||{}).name).filter(Boolean).map(esc).join(", ");
-  box.innerHTML=`<p class="note"><b>Spond:</b> ${r.going.length} going, ${r.not_going.length} can't make it, ${(r.no_answer||[]).length} haven't answered.${force||!Array.isArray(g.lineup)?" The lineup below is filled in from Spond; drag to set the order, then Save lineup.":" A lineup is already saved for this game, so it wasn't changed. Press Fill from Spond to start over from the RSVPs."}${r.not_going.length?` <br>Out: ${nm(r.not_going)}.`:""}${(r.unmatched||[]).length?` <br><span class="flag">Not matched to the roster: ${(r.unmatched||[]).map(esc).join(", ")}.</span> Make the roster name match Spond (first name and last initial works).`:""}</p>`;
+  const ins=changes.filter(c=>c[0]==="+").map(c=>c.slice(1)),outs=changes.filter(c=>c[0]==="-").map(c=>c.slice(1));
+  box.innerHTML=`<p class="note"><b>Spond:</b> ${r.going.length} going, ${r.not_going.length} can't make it, ${(r.no_answer||[]).length} haven't answered.${(r.added||[]).length?` <br><b>New on the roster from Spond:</b> ${dot((r.added||[]).map(p=>esc(p.name)).join(", "))} Add their jersey numbers on the Roster tab.`:""}${force||!Array.isArray(g.lineup)?" <br>The lineup below is filled in from Spond; drag to set the order, then Save lineup.":ins.length||outs.length?` <br><b>Changed since you saved:</b> ${ins.length?`added ${nm(ins)} (said going)`:""}${ins.length&&outs.length?"; ":""}${outs.length?`took out ${nm(outs)} (can't make it)`:""}. Press Save lineup to keep it.`:" <br>Your saved lineup matches Spond."}${r.not_going.length?` <br>Out: ${dot(nm(r.not_going))}`:""}${(r.unmatched||[]).length?` <br><span class="flag">Not matched to the roster: ${(r.unmatched||[]).map(esc).join(", ")}.</span> Make the roster name match Spond (first name and last initial works).`:""}</p>`;
 }
 function renderLineup(){
   let n=0;const rv=rsvps[(curGame()||{}).id];

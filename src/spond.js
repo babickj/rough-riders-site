@@ -86,6 +86,17 @@ export async function syncTeam(env, team, token) {
     upserts.push({ team_id: team.id, spond_id: g.spond_id, date: g.date, time: g.time, opp: g.opp, home: g.home, loc: g.loc });
     had ? updated++ : added++;
   }
+  // Anyone who said "going" to an upcoming game but isn't on the roster gets added.
+  try {
+    const now = Date.now();
+    const accepted = events.filter((e) => !e.cancelled && Date.parse(e.startTimestamp) >= now - 864e5 && games.some((g) => g.spond_id === String(e.id)))
+      .flatMap((e) => (e.responses && e.responses.acceptedIds) || []);
+    if (accepted.length) {
+      const [groups, players] = await Promise.all([spondGet(token, "groups/"), q(`players?team_id=eq.${encodeURIComponent(team.id)}&select=id,name,active`)]);
+      const recips = { recipients: { group: { members: events.flatMap((e) => ((e.recipients || {}).group || {}).members || []) } } };
+      await addAccepted(q, team.id, membersOf(groups, team.spond_group, recips), accepted, players);
+    }
+  } catch (e) { console.log("Adding Spond players failed for", team.id, e.message); }
   if (upserts.length)
     await q("games?on_conflict=spond_id", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(upserts) });
   await q(`teams?id=eq.${encodeURIComponent(team.id)}`, { method: "PATCH", body: JSON.stringify({ spond_synced_at: new Date().toISOString() }) });
@@ -109,6 +120,26 @@ export function matchMembers(members, players) {
   }
   return out;
 }
+// Kids who say "going" in Spond but aren't on the site's roster yet get added to it (name as "First L.").
+// A player a coach removed from the roster (inactive) is never re-added.
+export async function addAccepted(q, teamId, members, acceptedIds, players) {
+  const map = matchMembers(members, players);
+  const byId = Object.fromEntries(members.map((m) => [m.id, m]));
+  const fresh = [...new Set(acceptedIds)].filter((id) => !map[id] && byId[id] && byId[id].firstName);
+  if (!fresh.length) return { map, added: [] };
+  const rows = fresh.map((id) => { const m = byId[id], l = String(m.lastName || "").trim();
+    return { team_id: teamId, name: `${String(m.firstName).trim()}${l ? " " + l[0].toUpperCase() + "." : ""}`.slice(0, 40), num: 0, active: true }; });
+  const added = await q("players", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify(rows) }) || [];
+  added.forEach((p, i) => { map[fresh[i]] = p.id; });
+  await q("activity", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ team_id: teamId, by_name: "Spond sync", what: `Added ${added.map((p) => p.name).join(", ")} to the roster (said going in Spond)` }) }).catch(() => {});
+  return { map, added };
+}
+const membersOf = (groups, groupId, ev) => {
+  const group = (groups || []).find((g) => g.id === groupId) || {};
+  const all = [...(group.members || []), ...(((ev && ev.recipients) || {}).group || {}).members || []];
+  return Object.values(Object.fromEntries(all.map((m) => [m.id, m])));
+};
+
 async function rsvp(env, team, game, q) {
   const token = await spondLogin(env);
   const day = new Date(game.date + "T12:00:00Z");
@@ -116,20 +147,20 @@ async function rsvp(env, team, game, q) {
   const [events, groups, players] = await Promise.all([
     spondGet(token, `sponds/?max=100&scheduled=true&includeHidden=true&groupId=${encodeURIComponent(team.spond_group)}&minStartTimestamp=${from}&maxEndTimestamp=${to}`),
     spondGet(token, "groups/"),
-    q(`players?team_id=eq.${encodeURIComponent(team.id)}&active=eq.true&select=id,name`),
+    q(`players?team_id=eq.${encodeURIComponent(team.id)}&select=id,name,active`),
   ]);
   let ev = (events || []).find((e) => String(e.id) === String(game.spond_id));
   if (!ev) ev = ((await spondGet(token, `sponds/?max=500&scheduled=true&includeHidden=true&groupId=${encodeURIComponent(team.spond_group)}&minStartTimestamp=${from}`)) || []).find((e) => String(e.id) === String(game.spond_id));
   if (!ev) return { error: "Couldn't find this game in Spond anymore." };
-  const group = (groups || []).find((g) => g.id === team.spond_group) || {};
-  const members = [...(group.members || []), ...(((ev.recipients || {}).group || {}).members || [])];
+  const members = membersOf(groups, team.spond_group, ev);
   const byId = Object.fromEntries(members.map((m) => [m.id, m]));
-  const map = matchMembers(Object.values(byId), players);
   const r = ev.responses || {};
-  const pick = (ids) => (ids || []).map((id) => map[id]).filter(Boolean);
+  const { map, added } = await addAccepted(q, team.id, members, r.acceptedIds || [], players);
+  const inactive = new Set(players.filter((p) => p.active === false).map((p) => p.id));
+  const pick = (ids) => (ids || []).map((id) => map[id]).filter((id) => id && !inactive.has(id));
   const unmatched = [...(r.acceptedIds || []), ...(r.declinedIds || []), ...(r.unansweredIds || [])]
-    .filter((id) => !map[id] && byId[id]).map((id) => `${byId[id].firstName || ""} ${byId[id].lastName || ""}`.trim());
-  return { going: pick(r.acceptedIds), not_going: pick(r.declinedIds), no_answer: pick([...(r.unansweredIds || []), ...(r.unconfirmedIds || [])]), waiting: pick(r.waitinglistIds), unmatched };
+    .filter((id) => !map[id] && byId[id] && !(r.acceptedIds || []).includes(id)).map((id) => `${byId[id].firstName || ""} ${byId[id].lastName || ""}`.trim());
+  return { added: added.map((p) => ({ id: p.id, name: p.name, num: p.num, active: true, team_id: p.team_id })), going: pick(r.acceptedIds), not_going: pick(r.declinedIds), no_answer: pick([...(r.unansweredIds || []), ...(r.unconfirmedIds || [])]), waiting: pick(r.waitinglistIds), unmatched };
 }
 
 // Runs on the Worker's schedule (see wrangler.jsonc "triggers").
